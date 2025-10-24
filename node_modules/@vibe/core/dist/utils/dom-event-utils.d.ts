@@ -1,0 +1,16 @@
+import React from "react";
+export declare function isEnterEvent(event: React.KeyboardEvent): boolean;
+export declare function isShiftEnterEvent(event: React.KeyboardEvent): boolean;
+export declare function isEscapeEvent(event: React.KeyboardEvent): boolean;
+export declare function isArrowUpEvent(event: React.KeyboardEvent): boolean;
+export declare function isArrowDownEvent(event: React.KeyboardEvent): boolean;
+export declare function isArrowRightEvent(event: React.KeyboardEvent): boolean;
+export declare function isArrowLeftEvent(event: React.KeyboardEvent): boolean;
+export declare function isBackspaceEvent(event: React.KeyboardEvent): boolean;
+export declare function isSpaceEvent(event: React.KeyboardEvent): boolean;
+export declare function isTabEvent(event: React.KeyboardEvent): boolean;
+export declare function isPageUpEvent(event: React.KeyboardEvent): boolean;
+export declare function isPageDownEvent(event: React.KeyboardEvent): boolean;
+export declare function isEndEvent(event: React.KeyboardEvent): boolean;
+export declare function isHomeEvent(event: React.KeyboardEvent): boolean;
+export declare function isShiftTabEvent(event: React.KeyboardEvent): boolean;

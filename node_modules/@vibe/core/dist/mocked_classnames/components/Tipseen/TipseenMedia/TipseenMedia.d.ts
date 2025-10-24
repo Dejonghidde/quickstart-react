@@ -1,0 +1,8 @@
+import { PropsWithChildren, ReactNode } from "react";
+import VibeComponentProps from "../../../types/VibeComponentProps";
+import VibeComponent from "../../../types/VibeComponent";
+export interface TipseenMediaProps extends PropsWithChildren<VibeComponentProps> {
+    children: ReactNode;
+}
+declare const TipseenMedia: VibeComponent<TipseenMediaProps, HTMLElement>;
+export default TipseenMedia;

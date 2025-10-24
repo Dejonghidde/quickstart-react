@@ -1,0 +1,6 @@
+import { CloseMenuOption } from "../MenuConstants";
+export default function useOnCloseMenu({ setActiveItemIndex, setOpenSubMenuIndex, onClose }: {
+    setActiveItemIndex: (index: number) => void;
+    setOpenSubMenuIndex: (index: number) => void;
+    onClose: (option: CloseMenuOption) => void;
+}): (option?: CloseMenuOption) => void;

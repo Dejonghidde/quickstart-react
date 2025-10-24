@@ -1,0 +1,9 @@
+import { LegacyRef, MutableRefObject } from "react";
+/**
+ * Returns a single ref callback that merges multiple ref callbacks
+ * @deprecated - for internal usage - use `useMergeRef` hook instead
+ * @param refs
+ */
+export default function useMergeRefs<T = any>({ refs }: {
+    refs: Array<MutableRefObject<T> | LegacyRef<T>>;
+}): (node: HTMLElement) => void;

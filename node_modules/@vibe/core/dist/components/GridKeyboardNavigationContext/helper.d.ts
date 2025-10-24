@@ -1,0 +1,6 @@
+import { NavDirections } from "../../hooks/useFullKeyboardListeners";
+import { DirectionMap, DirectionMaps, GridElementRef, Position } from "./GridKeyboardNavigationContextConstants";
+export declare const getDirectionMaps: (positions: Position[]) => DirectionMaps;
+export declare const getOppositeDirection: (direction: NavDirections) => NavDirections;
+export declare const getOutmostElementInDirection: (directionMaps: DirectionMaps, direction: NavDirections) => GridElementRef;
+export declare const getNextElementToFocusInDirection: (directionMap: DirectionMap, elementRef: GridElementRef) => null | GridElementRef;

@@ -1,0 +1,15 @@
+import React from "react";
+import { NavDirections } from "../../hooks/useFullKeyboardListeners";
+import { GridElementRef, GridKeyboardNavigationContextType, Position } from "./GridKeyboardNavigationContextConstants";
+export declare const GridKeyboardNavigationContext: React.Context<GridKeyboardNavigationContextType>;
+/**
+ * @param {({topElement: MutableRefObject, bottomElement: MutableRefObject}|
+ * {leftElement: MutableRefObject, rightElement: MutableRefObject})[]} positions - the positions of the navigable items
+ * @param {*} wrapperRef - a reference for a wrapper element which contains all the referenced elements
+ * @param options - { disabled: boolean }
+ */
+export declare const useGridKeyboardNavigationContext: (positions: Position[], wrapperRef: GridElementRef, options?: {
+    disabled: boolean;
+}) => {
+    onOutboundNavigation: (elementRef: GridElementRef, direction: NavDirections) => void;
+};

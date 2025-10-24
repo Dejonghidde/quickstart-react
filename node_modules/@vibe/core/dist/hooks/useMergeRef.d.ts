@@ -1,0 +1,7 @@
+import { ForwardedRef, RefObject } from "react";
+/**
+ * Returns a single ref callback that merges multiple ref callbacks - internal replacement for `useMergeRefs` hook
+ * @param refs
+ */
+declare function useMergeRef<T>(...refs: (RefObject<T> | ForwardedRef<T> | null)[]): RefObject<T>;
+export default useMergeRef;

@@ -1,0 +1,6 @@
+import * as React from 'react';
+export interface SortAscendingProps extends React.SVGAttributes<SVGElement> {
+    size?: string | number;
+}
+declare const SortAscending: React.FC<SortAscendingProps>;
+export default SortAscending;

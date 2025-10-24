@@ -1,0 +1,4 @@
+import { RefObject } from "react";
+export default function useIsMouseEnter({ ref }: {
+    ref: RefObject<HTMLElement>;
+}): boolean;

@@ -1,0 +1,4 @@
+import { ReactElement } from "react";
+import { MenuChild } from "../MenuConstants";
+export declare function isMenuChildSelectable(child: MenuChild): boolean;
+export declare const generateMenuItemId: (menuId: string, child: ReactElement, index: number) => string;

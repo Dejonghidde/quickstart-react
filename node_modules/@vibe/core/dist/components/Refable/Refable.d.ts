@@ -1,0 +1,7 @@
+import React, { ReactElement } from "react";
+import { VibeComponentProps } from "../../types";
+export declare const Refable: React.ForwardRefExoticComponent<Omit<React.HTMLProps<any> & VibeComponentProps & {
+    children?: React.ReactNode;
+} & {
+    children: ReactElement | ReactElement[] | string;
+}, "ref"> & React.RefAttributes<React.ReactElement<any, string | React.JSXElementConstructor<any>>>>;

@@ -1,0 +1,14 @@
+import moment from "moment";
+export type Moment = moment.Moment;
+export declare enum FocusInput {
+    startDate = "startDate",
+    endDate = "endDate"
+}
+export declare enum Direction {
+    next = "next",
+    prev = "prev"
+}
+export interface RangeDate {
+    startDate: Moment | null;
+    endDate: Moment | null;
+}
