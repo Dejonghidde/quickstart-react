@@ -1,4 +1,4 @@
-import React from "react";
+`import React from "react";
 import monday from "./monday";
 import "./ui.css";
 
@@ -10,7 +10,7 @@ function useItemIdFromHash() {
   React.useEffect(() => {
     const onHash = () => setId(read());
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+      <div className="wrap">return () => window.removeEventListener("hashchange", onHash);
   }, []);
   return id; // altijd string ("" als niet aanwezig)
 }
@@ -132,20 +132,8 @@ const activeMedia = React.useMemo(
 
 // Vind de kolom-id van "Media" op basis van de kolomtitel (fallback: 'files')
 const mediaColumnId = React.useMemo(() => {
-  if (!item?.column_values) return null;
-
-  // 1. Hard match op de échte column id van de Media-kolom
-  const hard = item.column_values.find(cv => cv.id === "file_mkwyrehq");
-  if (hard) return hard.id;
-
-  // 2. Safety fallback: titel bevat "media"
-  const byTitle = item.column_values.find(cv =>
-    /media/i.test(cv?.column?.title || "")
-  );
-  if (byTitle) return byTitle.id;
-
-  console.warn("⚠ mediaColumnId niet gevonden in item.column_values");
-  return null;
+  const hit = (item?.column_values || []).find(cv => /media/i.test(cv?.column?.title || ""));
+  return hit?.id || "files";
 }, [item]);
 
 // Zorg dat we een Int itemId hebben voor de mutatie
@@ -312,80 +300,32 @@ if (assets[0]) {
 
 // Leeg de files-kolom op Monday (eerst officieel, zo nodig fallback)
 async function clearMediaOnMonday() {
-  // 1. Check of we een geldig itemId hebben
-  const rawId = item?.id ?? itemIdStr;
-  if (!rawId) {
-    console.warn("clearMediaOnMonday: geen geldig itemId (item?.id / itemIdStr is leeg)");
-    return;
-  }
+  const itemIdForMutation = String(item?.id ?? itemIdStr);
+  if (!itemIdForMutation) return;
 
-  // 2. Check of we een geldige mediaColumnId hebben (bv. "file_mkwyrehq")
-  if (!mediaColumnId) {
-    console.warn("clearMediaOnMonday: geen mediaColumnId, stop");
-    return;
-  }
-
-  const itemIdForMutation = String(rawId);
-
-  console.log("clearMediaOnMonday() start", {
-    itemIdForMutation,
-    mediaColumnId,
-  });
-
-  // --- POGING 1: officiële clear_item_files mutation ---
   try {
     const M1 = `
       mutation ($itemId: ID!, $columnId: String!) {
-        clear_item_files(item_id: $itemId, column_id: $columnId) {
-          id
-        }
+        clear_item_files(item_id: $itemId, column_id: $columnId) { id }
       }`;
-
-    const res1 = await monday.api(M1, {
-      variables: {
-        itemId: itemIdForMutation,
-        columnId: mediaColumnId,
-      },
+    await monday.api(M1, {
+      variables: { itemId: itemIdForMutation, columnId: mediaColumnId }
     });
-
-    console.log("M1 response:", res1);
-    return; // gelukt → stop hier
-  } catch (err) {
-    console.warn("M1 clear_item_files faalde, probeer fallback…", err);
-  }
-
-  // --- POGING 2: fallback via change_simple_column_value ---
-  try {
+  } catch (e) {
+    console.warn("clear_item_files faalde, fallback proberen…", e);
     const M2 = `
       mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
-        change_simple_column_value(
-          item_id: $itemId,
-          column_id: $columnId,
-          value: $val
-        ) {
-          id
-        }
+        change_simple_column_value(item_id: $itemId, column_id: $columnId, value: $val) { id }
       }`;
-
-    // Belangrijk verschil:
-    // Files-kolom leegmaken = lege array "[]", niet "{}"
-    const res2 = await monday.api(M2, {
-      variables: {
-        itemId: itemIdForMutation,
-        columnId: mediaColumnId,
-        val: "[]",
-      },
+    await monday.api(M2, {
+      variables: { itemId: itemIdForMutation, columnId: mediaColumnId, val: "{}" }
     });
-
-    console.log("M2 response:", res2);
-  } catch (err2) {
-    console.error("Fallback M2 faalde ook:", err2);
   }
 }
 
 // UI + Monday in één keer opschonen
 async function handleClearAllMedia() {
-  await clearMediaOnMonday(); // laat ‘m gewoon runnen; errors loggen we al daar
+  try { await clearMediaOnMonday(); } catch (e) { console.warn(e); }
   setUploaded([]);
   setActiveMediaIdx(0);
 }
