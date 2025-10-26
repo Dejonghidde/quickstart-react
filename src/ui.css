@@ -441,12 +441,14 @@ label.hook input[type="radio"]{
   border-radius: var(--radius);
   background: #fff;
   box-shadow: var(--shadow);
-  width: 100%
+  width: 100%;
  max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
 }
-.mediaRow + .mediaRow { margin-top: 8px; }
+.mediaRow + .mediaRow { 
+  margin-top: 8px; 
+}
 
 .mediaMeta {
   display: flex;
