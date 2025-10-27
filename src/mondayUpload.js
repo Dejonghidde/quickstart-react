@@ -1,31 +1,42 @@
-export async function uploadFileToMonday({ file, itemId, columnId, apiToken }) {
-  // GraphQL multipart (operations + map)
+export async function uploadFileToMonday({ file, itemId, columnId }) {
+  const form = new FormData();
+  
   const operations = JSON.stringify({
     query: `
-      mutation add($file: File!, $itemId: ID!, $columnId: String!) {
-        add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
-      }`,
-    variables: { file: null, itemId: String(itemId), columnId }
+      mutation($file: File!, $itemId: ID!, $columnId: String!) {
+        add_file_to_column(
+          file: $file,
+          item_id: $itemId,
+          column_id: $columnId
+        ) {
+          id
+        }
+      }
+    `,
+    variables: {
+      file: null,
+      itemId: String(itemId),
+      columnId
+    }
   });
 
-  const map = JSON.stringify({ "0": ["variables.file"] });
-
-  const form = new FormData();
   form.append("operations", operations);
-  form.append("map", map);
-  form.append("0", file, file.name);
+  form.append("map", JSON.stringify({ "0": ["variables.file"] }));
+  form.append("0", file);
 
-  const headers = {};
-  if (apiToken) headers["Authorization"] = apiToken;
-
-  const resp = await fetch("https://api.monday.com/v2", {
+  const res = await fetch("https://api.monday.com/v2", {
     method: "POST",
-    headers,
-    body: form,
-    credentials: "omit",
+    headers: {
+      // Don't set user-agent header
+      Accept: "application/json",
+    },
+    body: form
   });
 
-  const json = await resp.json();
-  if (json.errors) throw json.errors;
+  const json = await res.json();
+  if (json.errors) {
+    throw new Error(json.errors[0].message);
+  }
+  
   return json.data?.add_file_to_column?.id;
 }

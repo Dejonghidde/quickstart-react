@@ -429,81 +429,70 @@ export default function ItemPage() {
       return;
     }
 
-    // pick column object (so we can check column.type)
-    const previewColObj = (item?.column_values || []).find(cv =>
-      (previewColumnId && cv.id === previewColumnId) ||
-      /linkedin preview|preview|linkedin/i.test(cv?.column?.title || "")
+    // Get full column object to check type
+    const previewCol = item.column_values.find(cv =>
+      cv.id === "board_relation_mkw9ah6f" || // exact ID match
+      /linkedin|preview/i.test(cv?.column?.title || "")
     );
 
-    if (!previewColObj) {
+    if (!previewCol) {
       console.warn("Available columns:", item?.column_values);
-      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' (Long Text) kolom aan.");
+      setErr("Preview kolom niet gevonden");
       return;
     }
 
     const currentText = (previewRef.current?.innerText || "").trim();
-
+    
     setIsSavingPreview(true);
     setErr(null);
 
     try {
-      let res = null;
-      const boardId = String(item.board.id);
-      const itemId = String(item.id);
-      const columnId = previewColObj.id;
-      const colType = previewColObj?.column?.type || "";
+      const mutation = `
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
+          change_column_value(
+            item_id: $itemId,
+            board_id: $boardId,
+            column_id: $columnId,
+            value: $value
+          ) {
+            id
+          }
+        }`;
 
-      if (colType === "text") {
-        // plain text column -> use change_simple_column_value with String!
-        const MUT = `
-          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $val: String!) {
-            change_simple_column_value(item_id: $itemId, board_id: $boardId, column_id: $colId, value: $val) {
-              id
-            }
-          }`;
-        res = await monday.api(MUT, {
-          variables: { itemId, boardId, colId: columnId, val: currentText }
-        });
-      } else {
-        // other columns (long text / board-relation etc.) -> use change_column_value with JSON
-        const MUT = `
-          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $value: JSON!) {
-            change_column_value(item_id: $itemId, board_id: $boardId, column_id: $colId, value: $value) {
-              id
-            }
-          }`;
-        // For typical long-text use { text: "..." }
-        const payload = JSON.stringify({ text: currentText });
-        res = await monday.api(MUT, {
-          variables: { itemId, boardId, colId: columnId, value: payload }
-        });
-      }
+      // Structure for board-relation column
+      const value = JSON.stringify({
+        linkedPulseIds: [], // Keep any existing links
+        text: currentText,   // Update text content
+      });
 
-      console.log("Save response:", res);
-      if (res?.error || !res?.data || (!res.data.change_column_value && !res.data.change_simple_column_value)) {
-        throw new Error(res?.error || "Failed to save preview");
+      const variables = {
+        itemId: String(item.id),
+        boardId: String(item.board.id),
+        columnId: previewCol.id,
+        value
+      };
+
+      console.log("Saving preview with:", variables);
+      const res = await monday.api(mutation, { variables });
+      
+      if (res?.error || !res?.data?.change_column_value?.id) {
+        throw new Error(res?.error || "Failed to save");
       }
 
       // Update local state
-      setItem(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          column_values: (prev.column_values || []).map(cv =>
-            cv.id === previewColObj.id ? { ...cv, text: currentText } : cv
-          ),
-        };
-      });
+      setItem(prev => ({
+        ...prev,
+        column_values: prev.column_values.map(cv =>
+          cv.id === previewCol.id ? { ...cv, text: currentText } : cv
+        )
+      }));
 
       setIsDirty(false);
       setPreviewOverride("");
-      if (previewRef.current && previewRef.current.innerText !== currentText) {
-        previewRef.current.innerText = currentText;
-      }
       setPreviewSavedAt(new Date());
     } catch (err) {
       console.error("Save failed:", err);
-      setErr(`Save failed: ${err.message || "Unknown error"}`);
+      setErr(`Save failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSavingPreview(false);
     }
