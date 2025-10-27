@@ -348,8 +348,12 @@ async function clearMediaOnMonday() {
       },
     });
 
+    if (res1?.error || !res1?.data?.clear_item_files?.id) {
+      throw new Error(res1?.error || 'Failed to clear files');
+    }
+
     console.log("M1 response:", res1);
-    return; // gelukt → stop hier
+    return true; // Indicate success
   } catch (err) {
     console.warn("M1 clear_item_files faalde, probeer fallback…", err);
   }
@@ -377,17 +381,96 @@ async function clearMediaOnMonday() {
       },
     });
 
+    if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
+      throw new Error(res2?.error || 'Failed to clear files via fallback');
+    }
+
     console.log("M2 response:", res2);
+    return true; // Indicate success
   } catch (err2) {
     console.error("Fallback M2 faalde ook:", err2);
+    throw err2; // Re-throw to handle in calling function
   }
 }
 
 // UI + Monday in één keer opschonen
 async function handleClearAllMedia() {
-  await clearMediaOnMonday(); // laat ‘m gewoon runnen; errors loggen we al daar
-  setUploaded([]);
-  setActiveMediaIdx(0);
+  try {
+    const success = await clearMediaOnMonday();
+    if (success) {
+      setUploaded([]);
+      setActiveMediaIdx(0);
+    } else {
+      console.error("Failed to clear media on Monday.com");
+      // Optionally show error to user
+      setErr("Failed to clear media on Monday.com");
+    }
+  } catch (error) {
+    console.error("Error clearing media:", error);
+    // Optionally show error to user
+    setErr(`Error clearing media: ${error.message}`);
+  }
+}
+
+const previewRef = React.useRef(null);
+const [isSavingPreview, setIsSavingPreview] = React.useState(false);
+const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
+
+async function savePreviewToMonday() {
+  if (!item && !itemIdStr) {
+    setErr("Geen itemId om op te slaan");
+    return;
+  }
+
+  // 1) find a suitable column id (tweak the regex / fallback to explicit id)
+  const previewCol = (item?.column_values || []).find(cv =>
+    /preview|linkedin/i.test(cv?.column?.title || "")
+  )?.id || "preview_text"; // replace "preview_text" with your real column id if known
+
+  // 2) get the current text from the editable div (source of truth)
+  const currentText = (previewRef.current ? previewRef.current.innerText : effectivePreview || "").trim();
+
+  setIsSavingPreview(true);
+  setErr(null);
+
+  try {
+    const MUT = `
+      mutation ($itemId: ID!, $columnId: String!, $value: JSON!) {
+        change_simple_column_value(item_id: $itemId, column_id: $columnId, value: $value) {
+          id
+        }
+      }`;
+
+    // change_simple_column_value expects the 'value' param as JSON — send a JSON string
+    const variables = {
+      itemId: String(item?.id ?? itemIdStr),
+      columnId: previewCol,
+      value: JSON.stringify(currentText)
+    };
+
+    const res = await monday.api(MUT, { variables });
+
+    if (res?.error || !res?.data?.change_simple_column_value?.id) {
+      throw new Error(res?.error || "Monday API returned no id");
+    }
+
+    // update local item state so UI reflects saved value (optional but useful)
+    setItem(prev => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      next.column_values = (prev.column_values || []).map(cv =>
+        cv.id === previewCol ? { ...cv, text: currentText } : cv
+      );
+      return next;
+    });
+
+    setPreviewSavedAt(new Date());
+  } catch (e) {
+    console.error("Failed saving preview to Monday:", e);
+    setErr(String(e));
+  } finally {
+    setIsSavingPreview(false);
+  }
 }
 
   /** Render */
@@ -549,7 +632,67 @@ async function handleClearAllMedia() {
                   }
                   return next;
                 });
-              }}
+              }}              async function clearMediaOnMonday() {
+                // ...existing code...
+              
+                // --- POGING 1: officiële clear_item_files mutation ---
+                try {
+                  const M1 = `
+                    mutation ($itemId: ID!, $columnId: String!) {
+                      clear_item_files(item_id: $itemId, column_id: $columnId) {
+                        id
+                      }
+                    }`;
+              
+                  const res1 = await monday.api(M1, {
+                    variables: {
+                      itemId: itemIdForMutation,
+                      columnId: mediaColumnId,
+                    },
+                  });
+              
+                  if (res1?.error || !res1?.data?.clear_item_files?.id) {
+                    throw new Error(res1?.error || 'Failed to clear files');
+                  }
+              
+                  console.log("M1 response:", res1);
+                  return true; // Indicate success
+                } catch (err) {
+                  console.warn("M1 clear_item_files faalde, probeer fallback…", err);
+                }
+              
+                // --- POGING 2: fallback via change_simple_column_value ---
+                try {
+                  const M2 = `
+                    mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
+                      change_simple_column_value(
+                        item_id: $itemId,
+                        column_id: $columnId,
+                        value: $val
+                      ) {
+                        id
+                      }
+                    }`;
+              
+                  const res2 = await monday.api(M2, {
+                    variables: {
+                      itemId: itemIdForMutation,
+                      columnId: mediaColumnId,
+                      val: "[]",
+                    },
+                  });
+              
+                  if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
+                    throw new Error(res2?.error || 'Failed to clear files via fallback');
+                  }
+              
+                  console.log("M2 response:", res2);
+                  return true; // Indicate success
+                } catch (err2) {
+                  console.error("Fallback M2 faalde ook:", err2);
+                  throw err2; // Re-throw to handle in calling function
+                }
+              }
             >
               Verwijder
             </button>
@@ -573,6 +716,7 @@ async function handleClearAllMedia() {
   <div className="liBody">
     {/* Eén enkel vlak, geen tweede ‘card’ eronder */}
     <div
+      ref={previewRef}
       className="liPostText"
       contentEditable
       suppressContentEditableWarning
@@ -626,6 +770,19 @@ async function handleClearAllMedia() {
       <button className="liAction">🔗 Share</button>
       <button className="liAction">✉️ Send</button>
     </div>
+  </div>
+  
+  {/* Save button */}
+  <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+    <button
+      type="button"
+      onClick={savePreviewToMonday}
+      disabled={isSavingPreview}
+      className="linkBtn"
+    >
+      {isSavingPreview ? "Saving…" : "Save preview"}
+    </button>
+    {previewSavedAt && <span style={{ fontSize: 12, color: "#666" }}>Saved {previewSavedAt.toLocaleTimeString()}</span>}
   </div>
   
   </>
