@@ -383,24 +383,44 @@ export default function ItemPage() {
   const [isSavingPreview, setIsSavingPreview] = React.useState(false);
   const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
 
+  // keep a reliable preview column id (prefer the exact internal id you provided)
+  const previewColumnId = React.useMemo(() => {
+    if (!item?.column_values) return null;
+    // prefer the exact internal id you pasted (text_mkx3qq8w), else match title
+    const byId = item.column_values.find(cv => /text_mkx3qq8w/i.test(cv.id));
+    if (byId) return byId.id;
+    const byTitle = item.column_values.find(cv => /linkedin preview|preview|linkedin/i.test(cv?.column?.title || ""));
+    return byTitle?.id || null;
+  }, [item]);
+
+  // Sync DOM -> set initial/externally-updated preview text when user hasn't edited
+  React.useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    if (!isDirty) {
+      const text = (effectivePreview || "");
+      if (el.innerText !== text) {
+        el.innerText = text;
+      }
+    }
+  }, [effectivePreview, isDirty]);
+
+  // Replace the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
       setErr("Missing item ID or board ID");
       return;
     }
 
-    const previewCol = (item?.column_values || []).find(cv =>
-      /preview|linkedin/i.test(cv?.column?.title || "")
-    );
-
-    if (!previewCol) {
-      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' kolom aan.");
+    // Prefer resolved previewColumnId (falls back to title matching when computing previewColumnId)
+    if (!previewColumnId) {
       console.warn("Available columns:", item?.column_values);
+      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' (Long Text) kolom aan.");
       return;
     }
 
-    const currentText = (previewRef.current?.innerText || effectivePreview || "").trim();
-    
+    const currentText = (previewRef.current?.innerText || "").trim();
+
     setIsSavingPreview(true);
     setErr(null);
 
@@ -417,39 +437,45 @@ export default function ItemPage() {
           }
         }`;
 
-      // Board relation column expects a different structure
-      const columnValue = JSON.stringify({
-        linkedPulseIds: [], // Keep any existing links
-        text: currentText   // Set the text content
-      });
+      // Structure depends on column type
+      const columnValue = JSON.stringify({ text: currentText });
 
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
-        columnId: previewCol.id,
+        columnId: previewColumnId,
         value: columnValue
       };
 
-      console.log("Saving preview with variables:", variables);
+      console.log("Saving preview with:", variables);
       const res = await monday.api(mutation, { variables });
-      console.log("Save preview response:", res);
+      console.log("Save response:", res);
       
       if (res?.error || !res?.data?.change_column_value?.id) {
-        throw new Error(res?.error || "Failed to save preview");
+        throw new Error(res?.error || "Failed to save");
       }
 
       // Update local state
-      setItem(prev => ({
-        ...prev,
-        column_values: prev.column_values.map(cv =>
-          cv.id === previewCol.id ? { ...cv, text: currentText } : cv
-        )
-      }));
+      setItem(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          column_values: (prev.column_values || []).map(cv =>
+            cv.id === previewColumnId ? { ...cv, text: currentText } : cv
+          ),
+        };
+      });
 
+      // mark saved and reset dirty state, ensure DOM shows saved text
+      setIsDirty(false);
+      setPreviewOverride("");
+      if (previewRef.current && previewRef.current.innerText !== currentText) {
+        previewRef.current.innerText = currentText;
+      }
       setPreviewSavedAt(new Date());
     } catch (err) {
-      console.error("Failed to save preview:", err);
-      setErr(`Failed to save: ${err.message || 'Unknown error'}`);
+      console.error("Save failed:", err);
+      setErr(`Save failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSavingPreview(false);
     }
@@ -612,7 +638,7 @@ export default function ItemPage() {
             </div>
 
             <div className="liBody">
-              {/* Eén enkel vlak, geen tweede ‘card’ eronder */}
+              {/* uncontrolled contentEditable: React does not write children so caret won't jump */}
               <div
                 ref={previewRef}
                 className="liPostText"
@@ -622,9 +648,7 @@ export default function ItemPage() {
                   setIsDirty(true);
                   setPreviewOverride(e.currentTarget.innerText);
                 }}
-              >
-                {(isDirty ? previewOverride : effectivePreview) || "Voorvertoning verschijnt hier…"}
-              </div>
+              />
             </div>
 
             {activeMedia ? (
@@ -676,7 +700,16 @@ export default function ItemPage() {
               type="button"
               onClick={savePreviewToMonday}
               disabled={isSavingPreview}
-              className="linkBtn"
+              className="linkBtn btnSave"
+              style={{
+                background: isSavingPreview ? "#6ea0d6" : "#0b66c3",
+                color: "#fff",
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "none",
+                cursor: isSavingPreview ? "default" : "pointer",
+                boxShadow: "0 1px 0 rgba(0,0,0,0.1)"
+              }}
             >
               {isSavingPreview ? "Saving…" : "Save preview"}
             </button>
