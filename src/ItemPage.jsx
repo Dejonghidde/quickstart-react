@@ -155,7 +155,7 @@ export default function ItemPage() {
   }, [item, itemIdStr]);
 
   // ───────────────── Upload handler ─────────────────
-  async function handleFilesPicked(fileList) {
+  async function handleFilesPicked(fileList = []) {
     const files = Array.from(fileList || []);
     if (!files.length || !itemIdInt) return;
 
@@ -391,10 +391,10 @@ export default function ItemPage() {
 
     const previewCol = (item?.column_values || []).find(cv =>
       /preview|linkedin/i.test(cv?.column?.title || "")
-    )?.id;
+    );
 
     if (!previewCol) {
-      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' (Long Text) kolom aan.");
+      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' kolom aan.");
       console.warn("Available columns:", item?.column_values);
       return;
     }
@@ -417,18 +417,20 @@ export default function ItemPage() {
           }
         }`;
 
-      // Text column expects this structure
-      const textValue = JSON.stringify({
-        text: currentText
+      // Board relation column expects a different structure
+      const columnValue = JSON.stringify({
+        linkedPulseIds: [], // Keep any existing links
+        text: currentText   // Set the text content
       });
 
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
-        columnId: previewCol,
-        value: textValue
+        columnId: previewCol.id,
+        value: columnValue
       };
 
+      console.log("Saving preview with variables:", variables);
       const res = await monday.api(mutation, { variables });
       console.log("Save preview response:", res);
       
@@ -440,14 +442,14 @@ export default function ItemPage() {
       setItem(prev => ({
         ...prev,
         column_values: prev.column_values.map(cv =>
-          cv.id === previewCol ? { ...cv, text: currentText } : cv
+          cv.id === previewCol.id ? { ...cv, text: currentText } : cv
         )
       }));
 
       setPreviewSavedAt(new Date());
     } catch (err) {
       console.error("Failed to save preview:", err);
-      setErr(String(err.message || err));
+      setErr(`Failed to save: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSavingPreview(false);
     }
