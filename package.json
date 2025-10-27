@@ -15,7 +15,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@mondaycom/apps-sdk": "^2.1.2",
+    "@mondaycom/apps-sdk": "^0.1.1",
     "@vibe/core": "^3.19.0",
     "monday-sdk-js": "^0.5.6",
     "serve": "^14.2.5"
@@ -41,6 +41,7 @@
     "concurrently": "^5.2.0",
     "cross-port-killer": "^1.2.1",
     "eslint-config-react-app": "^7.0.1",
+    "prettier": "^3.6.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "sass": "^1.54.8",

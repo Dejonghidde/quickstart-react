@@ -606,29 +606,6 @@ export default function ItemPage() {
                       </span>
                       {m.isLocal && <span className="badge">uploading…</span>}
                     </div>
-
-                    <div className="mediaActions">
-                      <button
-                        type="button"
-                        className="linkBtn danger"
-                        onClick={(e) => {
-                          e.stopPropagation(); // voorkom activeren van de rij bij klikken op Verwijder
-                          setUploaded((prev) => {
-                            const next = prev.filter((_, i) => i !== ix);
-                            // corrigeer actieve index
-                            if (ix === activeMediaIdx) {
-                              const newIdx = Math.min(Math.max(0, ix - 1), next.length - 1);
-                              setActiveMediaIdx(next.length ? newIdx : 0);
-                            } else if (ix < activeMediaIdx) {
-                              setActiveMediaIdx((i) => Math.max(0, i - 1));
-                            }
-                            return next;
-                          });
-                        }}
-                      >
-                        Verwijder
-                      </button>
-                    </div>
                   </div>
                 ))}
               </div>
