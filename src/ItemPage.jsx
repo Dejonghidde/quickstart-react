@@ -311,7 +311,6 @@ export default function ItemPage() {
 
   // Leeg de files-kolom op Monday (eerst officieel, zo nodig fallback)
   async function clearMediaOnMonday() {
-    // Get required IDs
     const rawId = item?.id ?? itemIdStr;
     const boardId = item?.board?.id;
     
@@ -324,12 +323,10 @@ export default function ItemPage() {
       return false;
     }
 
-    const itemIdForMutation = String(rawId);
-    
     try {
       const mutation = `
-        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: String!) {
-          change_simple_column_value(
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
+          change_column_value(
             item_id: $itemId,
             board_id: $boardId,
             column_id: $columnId,
@@ -339,17 +336,22 @@ export default function ItemPage() {
           }
         }`;
 
+      // File column expects this structure
+      const fileValue = JSON.stringify({
+        files: []
+      });
+
       const variables = {
-        itemId: itemIdForMutation,
+        itemId: String(rawId),
         boardId: String(boardId),
         columnId: mediaColumnId,
-        value: "[]" // Empty array as string for files column
+        value: fileValue
       };
 
       const res = await monday.api(mutation, { variables });
       console.log("Clear media response:", res);
 
-      if (res?.error || !res?.data?.change_simple_column_value?.id) {
+      if (res?.error || !res?.data?.change_column_value?.id) {
         throw new Error(res?.error || 'Failed to clear files');
       }
 
@@ -392,7 +394,8 @@ export default function ItemPage() {
     )?.id;
 
     if (!previewCol) {
-      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' kolom aan.");
+      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' (Long Text) kolom aan.");
+      console.warn("Available columns:", item?.column_values);
       return;
     }
 
@@ -403,8 +406,8 @@ export default function ItemPage() {
 
     try {
       const mutation = `
-        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: String!) {
-          change_simple_column_value(
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
+          change_column_value(
             item_id: $itemId,
             board_id: $boardId,
             column_id: $columnId,
@@ -414,16 +417,22 @@ export default function ItemPage() {
           }
         }`;
 
+      // Text column expects this structure
+      const textValue = JSON.stringify({
+        text: currentText
+      });
+
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
         columnId: previewCol,
-        value: currentText // Direct string value for text columns
+        value: textValue
       };
 
       const res = await monday.api(mutation, { variables });
+      console.log("Save preview response:", res);
       
-      if (res?.error || !res?.data?.change_simple_column_value?.id) {
+      if (res?.error || !res?.data?.change_column_value?.id) {
         throw new Error(res?.error || "Failed to save preview");
       }
 
