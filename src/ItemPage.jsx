@@ -1,5 +1,6 @@
 import React from "react";
 import monday from "./monday";
+import { uploadFileToMonday } from "./mondayUpload";
 import "./ui.css";
 
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
@@ -159,51 +160,68 @@ export default function ItemPage() {
     const files = Array.from(fileList || []);
     if (!files.length || !itemIdInt) return;
 
+    // try to obtain a client token if available (optional)
+    const clientToken =
+      (typeof process !== "undefined" && process.env.REACT_APP_MONDAY_API_TOKEN) ||
+      (monday?.getClientApiToken ? monday.getClientApiToken() : null) ||
+      null;
+
     for (const file of files) {
-      // 1) Plaats een tijdelijke UI-kaart met een unieke sleutel
       const objectUrl = URL.createObjectURL(file);
       const tmpKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const isVideo = /^video\//i.test(file.type);
 
-      // voeg placeholder toe en onthoud de index via de unieke sleutel
       setUploaded(prev => [...prev, {
         url: objectUrl,
         name: file.name,
         type: isVideo ? "video/*" : "image/*",
         isLocal: true,
-        _tmpKey: tmpKey,           // ← unieke sleutel om later te vervangen
+        _tmpKey: tmpKey,
       }]);
       setActiveMediaIdx(i => Math.max(i, 0));
 
       try {
-        // 2) Upload naar Monday (file column)
-        const MUT = `
-          mutation add($file: File!, $itemId: ID!, $columnId: String!) {
-            add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
+        // Prefer multipart upload via helper if we have a token (or try anyway)
+        let assetId = null;
+        if (clientToken) {
+          assetId = await uploadFileToMonday({
+            file,
+            itemId: String(item?.id ?? itemIdStr),
+            columnId: mediaColumnId,
+            apiToken: clientToken,
+          });
+        } else {
+          // Fallback: try to use monday.api (may fail because multipart isn't supported by SDK)
+          try {
+            const MUT = `
+              mutation add($file: File!, $itemId: ID!, $columnId: String!) {
+                add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
+              }
+            `;
+            const r1 = await monday.api(MUT, {
+              variables: { file, itemId: String(item?.id ?? itemIdStr), columnId: mediaColumnId }
+            });
+            assetId = r1?.data?.add_file_to_column?.id;
+          } catch (e) {
+            console.warn("Fallback monday.api upload failed; server token required for reliable uploads.", e);
+            throw e;
           }
-        `;
+        }
 
-        const itemIdForMutation = String(item?.id ?? itemIdStr);   // <-- forceer string
-        const r1 = await monday.api(MUT, {
-          variables: { file, itemId: itemIdForMutation, columnId: mediaColumnId }
-        });
-        const assetId = r1?.data?.add_file_to_column?.id;
         if (!assetId) throw new Error("Geen assetId terug van monday");
 
-        // 3) Haal publieke URL op
+        // Public URL query: ensure non-null variable definition
         const Q = `
-          query ($ids:[ID!]) {
-            assets(ids:$ids){ id name public_url url url_thumbnail }
+          query ($ids: [ID!]!) {
+            assets(ids: $ids){ id name public_url url url_thumbnail }
           }`;
         const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
         const a = r2?.data?.assets?.[0];
         if (!a) throw new Error("Asset details niet gevonden");
 
-        // 4) Vervang de tijdelijke entry op basis van _tmpKey
         setUploaded(prev => {
           const ix = prev.findIndex(p => p._tmpKey === tmpKey);
           if (ix === -1) return prev;
-
           const next = [...prev];
           next[ix] = {
             url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
@@ -215,7 +233,6 @@ export default function ItemPage() {
         });
       } catch (e) {
         console.warn("Upload mislukt:", e);
-        // als upload faalt: laat placeholder staan maar haal 'uploading…' weg en markeer ‘(failed)’
         setUploaded(prev => {
           const ix = prev.findIndex(p => p._tmpKey === tmpKey);
           if (ix === -1) return prev;
@@ -412,8 +429,13 @@ export default function ItemPage() {
       return;
     }
 
-    // Prefer resolved previewColumnId (falls back to title matching when computing previewColumnId)
-    if (!previewColumnId) {
+    // pick column object (so we can check column.type)
+    const previewColObj = (item?.column_values || []).find(cv =>
+      (previewColumnId && cv.id === previewColumnId) ||
+      /linkedin preview|preview|linkedin/i.test(cv?.column?.title || "")
+    );
+
+    if (!previewColObj) {
       console.warn("Available columns:", item?.column_values);
       setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' (Long Text) kolom aan.");
       return;
@@ -425,34 +447,41 @@ export default function ItemPage() {
     setErr(null);
 
     try {
-      const mutation = `
-        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
-          change_column_value(
-            item_id: $itemId,
-            board_id: $boardId,
-            column_id: $columnId,
-            value: $value
-          ) {
-            id
-          }
-        }`;
+      let res = null;
+      const boardId = String(item.board.id);
+      const itemId = String(item.id);
+      const columnId = previewColObj.id;
+      const colType = previewColObj?.column?.type || "";
 
-      // Structure depends on column type
-      const columnValue = JSON.stringify({ text: currentText });
+      if (colType === "text") {
+        // plain text column -> use change_simple_column_value with String!
+        const MUT = `
+          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $val: String!) {
+            change_simple_column_value(item_id: $itemId, board_id: $boardId, column_id: $colId, value: $val) {
+              id
+            }
+          }`;
+        res = await monday.api(MUT, {
+          variables: { itemId, boardId, colId: columnId, val: currentText }
+        });
+      } else {
+        // other columns (long text / board-relation etc.) -> use change_column_value with JSON
+        const MUT = `
+          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $value: JSON!) {
+            change_column_value(item_id: $itemId, board_id: $boardId, column_id: $colId, value: $value) {
+              id
+            }
+          }`;
+        // For typical long-text use { text: "..." }
+        const payload = JSON.stringify({ text: currentText });
+        res = await monday.api(MUT, {
+          variables: { itemId, boardId, colId: columnId, value: payload }
+        });
+      }
 
-      const variables = {
-        itemId: String(item.id),
-        boardId: String(item.board.id),
-        columnId: previewColumnId,
-        value: columnValue
-      };
-
-      console.log("Saving preview with:", variables);
-      const res = await monday.api(mutation, { variables });
       console.log("Save response:", res);
-      
-      if (res?.error || !res?.data?.change_column_value?.id) {
-        throw new Error(res?.error || "Failed to save");
+      if (res?.error || !res?.data || (!res.data.change_column_value && !res.data.change_simple_column_value)) {
+        throw new Error(res?.error || "Failed to save preview");
       }
 
       // Update local state
@@ -461,12 +490,11 @@ export default function ItemPage() {
         return {
           ...prev,
           column_values: (prev.column_values || []).map(cv =>
-            cv.id === previewColumnId ? { ...cv, text: currentText } : cv
+            cv.id === previewColObj.id ? { ...cv, text: currentText } : cv
           ),
         };
       });
 
-      // mark saved and reset dirty state, ensure DOM shows saved text
       setIsDirty(false);
       setPreviewOverride("");
       if (previewRef.current && previewRef.current.innerText !== currentText) {
@@ -475,7 +503,7 @@ export default function ItemPage() {
       setPreviewSavedAt(new Date());
     } catch (err) {
       console.error("Save failed:", err);
-      setErr(`Save failed: ${err.message || 'Unknown error'}`);
+      setErr(`Save failed: ${err.message || "Unknown error"}`);
     } finally {
       setIsSavingPreview(false);
     }
