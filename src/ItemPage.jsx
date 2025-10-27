@@ -311,84 +311,52 @@ export default function ItemPage() {
 
   // Leeg de files-kolom op Monday (eerst officieel, zo nodig fallback)
   async function clearMediaOnMonday() {
-    // 1. Check of we een geldig itemId hebben
+    // Get required IDs
     const rawId = item?.id ?? itemIdStr;
-    if (!rawId) {
-      console.warn("clearMediaOnMonday: geen geldig itemId (item?.id / itemIdStr is leeg)");
-      return;
+    const boardId = item?.board?.id;
+    
+    if (!rawId || !boardId) {
+      console.warn("clearMediaOnMonday: missing itemId or boardId", { rawId, boardId });
+      return false;
     }
-
-    // 2. Check of we een geldige mediaColumnId hebben (bv. "file_mkwyrehq")
     if (!mediaColumnId) {
-      console.warn("clearMediaOnMonday: geen mediaColumnId, stop");
-      return;
+      console.warn("clearMediaOnMonday: geen mediaColumnId");
+      return false;
     }
 
     const itemIdForMutation = String(rawId);
-
-    console.log("clearMediaOnMonday() start", {
-      itemIdForMutation,
-      mediaColumnId,
-    });
-
-    // --- POGING 1: officiële clear_item_files mutation ---
+    
     try {
-      const M1 = `
-        mutation ($itemId: ID!, $columnId: String!) {
-          clear_item_files(item_id: $itemId, column_id: $columnId) {
-            id
-          }
-        }`;
-
-      const res1 = await monday.api(M1, {
-        variables: {
-          itemId: itemIdForMutation,
-          columnId: mediaColumnId,
-        },
-      });
-
-      if (res1?.error || !res1?.data?.clear_item_files?.id) {
-        throw new Error(res1?.error || 'Failed to clear files');
-      }
-
-      console.log("M1 response:", res1);
-      return true; // Indicate success
-    } catch (err) {
-      console.warn("M1 clear_item_files faalde, probeer fallback…", err);
-    }
-
-    // --- POGING 2: fallback via change_simple_column_value ---
-    try {
-      const M2 = `
-        mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
+      const mutation = `
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: String!) {
           change_simple_column_value(
             item_id: $itemId,
+            board_id: $boardId,
             column_id: $columnId,
-            value: $val
+            value: $value
           ) {
             id
           }
         }`;
 
-      // Belangrijk verschil:
-      // Files-kolom leegmaken = lege array "[]", niet "{}"
-      const res2 = await monday.api(M2, {
-        variables: {
-          itemId: itemIdForMutation,
-          columnId: mediaColumnId,
-          val: "[]",
-        },
-      });
+      const variables = {
+        itemId: itemIdForMutation,
+        boardId: String(boardId),
+        columnId: mediaColumnId,
+        value: "[]" // Empty array as string for files column
+      };
 
-      if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
-        throw new Error(res2?.error || 'Failed to clear files via fallback');
+      const res = await monday.api(mutation, { variables });
+      console.log("Clear media response:", res);
+
+      if (res?.error || !res?.data?.change_simple_column_value?.id) {
+        throw new Error(res?.error || 'Failed to clear files');
       }
 
-      console.log("M2 response:", res2);
-      return true; // Indicate success
-    } catch (err2) {
-      console.error("Fallback M2 faalde ook:", err2);
-      throw err2; // Re-throw to handle in calling function
+      return true;
+    } catch (err) {
+      console.error("Failed to clear media:", err);
+      throw err;
     }
   }
 
@@ -414,53 +382,63 @@ export default function ItemPage() {
   const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
 
   async function savePreviewToMonday() {
-    if (!item && !itemIdStr) {
-      setErr("Geen itemId om op te slaan");
+    if (!item?.id || !item?.board?.id) {
+      setErr("Missing item ID or board ID");
       return;
     }
 
     const previewCol = (item?.column_values || []).find(cv =>
       /preview|linkedin/i.test(cv?.column?.title || "")
-    )?.id || "preview_text"; // replace "preview_text" with your real column id if known
+    )?.id;
 
-    const currentText = (previewRef.current ? previewRef.current.innerText : effectivePreview || "").trim();
+    if (!previewCol) {
+      setErr("Geen preview-kolom gevonden. Maak een 'LinkedIn Preview' kolom aan.");
+      return;
+    }
 
+    const currentText = (previewRef.current?.innerText || effectivePreview || "").trim();
+    
     setIsSavingPreview(true);
     setErr(null);
 
     try {
-      const MUT = `
-        mutation ($itemId: ID!, $columnId: String!, $value: JSON!) {
-          change_simple_column_value(item_id: $itemId, column_id: $columnId, value: $value) {
+      const mutation = `
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: String!) {
+          change_simple_column_value(
+            item_id: $itemId,
+            board_id: $boardId,
+            column_id: $columnId,
+            value: $value
+          ) {
             id
           }
         }`;
 
       const variables = {
-        itemId: String(item?.id ?? itemIdStr),
+        itemId: String(item.id),
+        boardId: String(item.board.id),
         columnId: previewCol,
-        value: JSON.stringify(currentText)
+        value: currentText // Direct string value for text columns
       };
 
-      const res = await monday.api(MUT, { variables });
-
+      const res = await monday.api(mutation, { variables });
+      
       if (res?.error || !res?.data?.change_simple_column_value?.id) {
-        throw new Error(res?.error || "Monday API returned no id");
+        throw new Error(res?.error || "Failed to save preview");
       }
 
-      setItem(prev => {
-        if (!prev) return prev;
-        const next = { ...prev };
-        next.column_values = (prev.column_values || []).map(cv =>
+      // Update local state
+      setItem(prev => ({
+        ...prev,
+        column_values: prev.column_values.map(cv =>
           cv.id === previewCol ? { ...cv, text: currentText } : cv
-        );
-        return next;
-      });
+        )
+      }));
 
       setPreviewSavedAt(new Date());
-    } catch (e) {
-      console.error("Failed saving preview to Monday:", e);
-      setErr(String(e));
+    } catch (err) {
+      console.error("Failed to save preview:", err);
+      setErr(String(err.message || err));
     } finally {
       setIsSavingPreview(false);
     }
@@ -605,6 +583,7 @@ export default function ItemPage() {
                         {m.name || "(naamloos)"}
                       </span>
                       {m.isLocal && <span className="badge">uploading…</span>}
+                    </div>
                     </div>
                   </div>
                 ))}
