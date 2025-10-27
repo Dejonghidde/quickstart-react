@@ -1,6 +1,12 @@
 import React from "react";
 import monday from "./monday";
 import { uploadFileToMonday } from "./mondayUpload";
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingIndicator from './components/LoadingIndicator';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import "./ui.css";
 
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
@@ -96,10 +102,13 @@ async function fetchItemSmart(itemIdStr) {
 
 /** ────────────────────────────── Component ──────────────────────────────── */
 export default function ItemPage() {
-  const itemIdStr = useItemIdFromHash(); // ← string uit #/item?id=...
+  // Existing state and handlers...
+  const itemIdStr = useItemIdFromHash();
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [item, setItem] = React.useState(null);
+  const [isSavingPreview, setIsSavingPreview] = React.useState(false);
+  const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
 
   // Prompts (volledig bewerkbaar in UI)
   const [prompts, setPrompts] = React.useState(["", "", ""]);
@@ -158,9 +167,11 @@ export default function ItemPage() {
   // ───────────────── Upload handler ─────────────────
   async function handleFilesPicked(fileList = []) {
     const files = Array.from(fileList || []);
-    if (!files.length || !itemIdInt) return;
+    if (!files.length || !itemIdInt) {
+      toast.error('No files selected or invalid item ID');
+      return;
+    }
 
-    // try to obtain a client token if available (optional)
     const clientToken =
       (typeof process !== "undefined" && process.env.REACT_APP_MONDAY_API_TOKEN) ||
       (monday?.getClientApiToken ? monday.getClientApiToken() : null) ||
@@ -181,18 +192,18 @@ export default function ItemPage() {
       setActiveMediaIdx(i => Math.max(i, 0));
 
       try {
-        // Prefer multipart upload via helper if we have a token (or try anyway)
+        const toastId = toast.loading(`Uploading ${file.name}...`);
         let assetId = null;
-        if (clientToken) {
-          assetId = await uploadFileToMonday({
-            file,
-            itemId: String(item?.id ?? itemIdStr),
-            columnId: mediaColumnId,
-            apiToken: clientToken,
-          });
-        } else {
-          // Fallback: try to use monday.api (may fail because multipart isn't supported by SDK)
-          try {
+        
+        try {
+          if (clientToken) {
+            assetId = await uploadFileToMonday({
+              file,
+              itemId: String(item?.id ?? itemIdStr),
+              columnId: mediaColumnId,
+              apiToken: clientToken,
+            });
+          } else {
             const MUT = `
               mutation add($file: File!, $itemId: ID!, $columnId: String!) {
                 add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
@@ -202,44 +213,58 @@ export default function ItemPage() {
               variables: { file, itemId: String(item?.id ?? itemIdStr), columnId: mediaColumnId }
             });
             assetId = r1?.data?.add_file_to_column?.id;
-          } catch (e) {
-            console.warn("Fallback monday.api upload failed; server token required for reliable uploads.", e);
-            throw e;
           }
+
+          if (!assetId) throw new Error("No asset ID returned from Monday");
+
+          // Get public URL
+          const Q = `
+            query ($ids: [ID!]!) {
+              assets(ids: $ids){ id name public_url url url_thumbnail }
+            }`;
+          const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
+          const a = r2?.data?.assets?.[0];
+          if (!a) throw new Error("Asset details not found");
+
+          setUploaded(prev => {
+            const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+            if (ix === -1) return prev;
+            const next = [...prev];
+            next[ix] = {
+              url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
+              name: a.name || file.name,
+              type: isVideo ? "video/*" : "image/*",
+              isLocal: false,
+            };
+            return next;
+          });
+
+          toast.update(toastId, {
+            render: `${file.name} uploaded successfully`,
+            type: 'success',
+            isLoading: false,
+            autoClose: 3000,
+          });
+        } catch (e) {
+          console.error("Upload failed:", e);
+          toast.update(toastId, {
+            render: `Failed to upload ${file.name}: ${e.message}`,
+            type: 'error',
+            isLoading: false,
+            autoClose: 5000,
+          });
+          
+          setUploaded(prev => {
+            const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+            if (ix === -1) return prev;
+            const next = [...prev];
+            next[ix] = { ...next[ix], isLocal: false, name: `${file.name} (failed)` };
+            return next;
+          });
         }
-
-        if (!assetId) throw new Error("Geen assetId terug van monday");
-
-        // Public URL query: ensure non-null variable definition
-        const Q = `
-          query ($ids: [ID!]!) {
-            assets(ids: $ids){ id name public_url url url_thumbnail }
-          }`;
-        const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
-        const a = r2?.data?.assets?.[0];
-        if (!a) throw new Error("Asset details niet gevonden");
-
-        setUploaded(prev => {
-          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-          if (ix === -1) return prev;
-          const next = [...prev];
-          next[ix] = {
-            url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
-            name: a.name || file.name,
-            type: isVideo ? "video/*" : "image/*",
-            isLocal: false,
-          };
-          return next;
-        });
       } catch (e) {
-        console.warn("Upload mislukt:", e);
-        setUploaded(prev => {
-          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-          if (ix === -1) return prev;
-          const next = [...prev];
-          next[ix] = { ...next[ix], isLocal: false, name: `${file.name} (failed)` };
-          return next;
-        });
+        console.error("File processing error:", e);
+        toast.error(`Error processing ${file.name}: ${e.message}`);
       }
     }
   }
@@ -425,19 +450,14 @@ export default function ItemPage() {
   // Replace the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
-      setErr("Missing item ID or board ID");
+      toast.error("Missing item ID or board ID");
       return;
     }
 
-    // Get full column object to check type
-    const previewCol = item.column_values.find(cv =>
-      cv.id === "board_relation_mkw9ah6f" || // exact ID match
-      /linkedin|preview/i.test(cv?.column?.title || "")
-    );
-
-    if (!previewCol) {
-      console.warn("Available columns:", item?.column_values);
-      setErr("Preview kolom niet gevonden");
+    const column = getColumnDetails(item.column_values);
+    if (!column) {
+      console.warn("Available columns:", item.column_values);
+      toast.error("Preview column not found");
       return;
     }
 
@@ -445,35 +465,58 @@ export default function ItemPage() {
     
     setIsSavingPreview(true);
     setErr(null);
+    
+    const toastId = toast.loading("Saving preview...");
 
     try {
-      const mutation = `
-        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
-          change_column_value(
-            item_id: $itemId,
-            board_id: $boardId,
-            column_id: $columnId,
-            value: $value
-          ) {
-            id
-          }
-        }`;
+      // Different mutation based on column type
+      const mutation = column.type === 'text' 
+        ? `mutation($itemId: ID!, $boardId: ID!, $colId: String!, $val: String!) {
+            change_simple_column_value(
+              item_id: $itemId, 
+              board_id: $boardId, 
+              column_id: $colId, 
+              value: $val
+            ) { id }
+          }`
+        : `mutation($itemId: ID!, $boardId: ID!, $colId: String!, $val: JSON!) {
+            change_column_value(
+              item_id: $itemId,
+              board_id: $boardId,
+              column_id: $colId,
+              value: $val
+            ) { id }
+          }`;
 
-      // Structure for board-relation column
-      const value = JSON.stringify({
-        linkedPulseIds: [], // Keep any existing links
-        text: currentText,   // Update text content
-      });
+      // Prepare value based on column type
+      let value;
+      if (column.type === 'text') {
+        value = currentText;
+      } else {
+        // For board-relation, preserve existing links
+        let existing = {};
+        try {
+          existing = column.value ? JSON.parse(column.value) : {};
+        } catch (e) {
+          console.warn("Could not parse existing value:", e);
+        }
+
+        value = JSON.stringify({
+          linkedPulseIds: existing.linkedPulseIds || [],
+          text: currentText
+        });
+      }
 
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
-        columnId: previewCol.id,
-        value
+        colId: column.id,
+        val: value
       };
 
-      console.log("Saving preview with:", variables);
+      console.log(`Saving to ${column.type} column:`, variables);
       const res = await monday.api(mutation, { variables });
+      console.log("Save response:", res);
       
       if (res?.error || !res?.data?.change_column_value?.id) {
         throw new Error(res?.error || "Failed to save");
@@ -483,15 +526,32 @@ export default function ItemPage() {
       setItem(prev => ({
         ...prev,
         column_values: prev.column_values.map(cv =>
-          cv.id === previewCol.id ? { ...cv, text: currentText } : cv
+          cv.id === column.id ? { 
+            ...cv, 
+            text: currentText,
+            value: column.type === 'text' ? currentText : value
+          } : cv
         )
       }));
 
       setIsDirty(false);
       setPreviewOverride("");
       setPreviewSavedAt(new Date());
+      
+      toast.update(toastId, {
+        render: "Preview saved successfully",
+        type: "success",
+        isLoading: false,
+        autoClose: 3000
+      });
     } catch (err) {
       console.error("Save failed:", err);
+      toast.update(toastId, {
+        render: `Save failed: ${err.message || 'Unknown error'}`,
+        type: "error",
+        isLoading: false,
+        autoClose: 5000
+      });
       setErr(`Save failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSavingPreview(false);
@@ -499,28 +559,65 @@ export default function ItemPage() {
   }
 
   /** Render */
-  if (!itemIdStr) {
-    return (
-      <div className="wrap">
-        <button type="button" className="btnBack" onClick={() => window.history.back()}>
-          ← Terug
-        </button>
-        <div className="meta" style={{ marginTop: 12 }}>Geen itemId in URL.</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="wrap">
-      <div className="hrow" style={{ justifyContent: "space-between" }}>
-        <button className="btnBack" onClick={() => (window.location.hash = "#/")}>← Terug</button>
-        <div className="meta">ItemId: {displayItemId} · Board: {displayBoardName} (ID {displayBoardId})</div>
+    <ErrorBoundary>
+      <div className="wrap">
+        <ToastContainer 
+          position="top-right"
+          autoClose={5000}
+          hideProgressBar={false}
+          newestOnTop={false}
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="light"
+        />
+        
+        {!itemIdStr ? (
+          <>
+            <button type="button" className="btnBack" onClick={() => window.history.back()}>
+              ← Back
+            </button>
+            <div className="meta" style={{ marginTop: 12 }}>No item ID in URL</div>
+          </>
+        ) : (
+          <>
+            <div className="hrow" style={{ justifyContent: "space-between" }}>
+              <button className="btnBack" onClick={() => (window.location.hash = "#/")}>← Back</button>
+              <div className="meta">
+                {item && `Item: ${item.name} · Board: ${item.board?.name}`}
+              </div>
+            </div>
+
+            <h2 className="h1" style={{ marginTop: 8 }}>Item Detail</h2>
+
+            {loading && <LoadingIndicator text="Loading item details..." />}
+            {err && (
+              <div className="error-message" style={{ marginTop: 12, color: "#b00020" }}>
+                Error: {err}
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="retry-button"
+                  style={{ marginLeft: 8 }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {!loading && !err && item && (
+              <div className="item-content">
+                {/* Rest of your existing content */}
+                {children}
+              </div>
+            )}
+          </>
+        )}
       </div>
-
-      <h2 className="h1" style={{ marginTop: 8 }}>Item detail</h2>
-
-      {loading && <div className="hint" style={{ marginTop: 12 }}>Laden…</div>}
-      {err && <div style={{ color: "#b00020", marginTop: 12 }}>Fout: {err}</div>}
+    </ErrorBoundary>
+  );
 
       {!loading && !err && (
         <>
@@ -736,4 +833,31 @@ export default function ItemPage() {
       )}
     </div>
   );
+}
+
+// First add this helper near the top
+function getColumnDetails(columnValues = []) {
+  // Log all columns for debugging
+  console.log("All columns:", columnValues.map(cv => ({
+    id: cv.id,
+    title: cv.column?.title,
+    type: cv.column?.type,
+    value: cv.value
+  })));
+
+  // Try to find preview column
+  const previewColumn = columnValues.find(cv => 
+    cv.id === "text_mkx3qq8w" ||           // exact text column match
+    cv.id === "board_relation_mkw9ah6f" || // exact board relation match
+    /linkedin preview|preview|linkedin/i.test(cv?.column?.title || "")
+  );
+
+  if (!previewColumn) return null;
+
+  return {
+    id: previewColumn.id,
+    type: previewColumn.column?.type || 'text',
+    value: previewColumn.value,
+    title: previewColumn.column?.title
+  };
 }

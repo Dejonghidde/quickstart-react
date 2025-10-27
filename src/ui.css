@@ -534,4 +534,93 @@ label.hook {
   cursor: default;
 }
 
+/* Upload states */
+.mediaStatus {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f5f6f8;
+}
+
+.mediaStatus.uploading {
+  background: #f0f3ff;
+  color: #0073ea;
+}
+
+.mediaStatus.success {
+  background: #e5f4e3;
+  color: #037f4c;
+}
+
+.mediaStatus.error {
+  background: #fce6e8;
+  color: #d83a52;
+}
+
+/* Preview editor improvements */
+.previewEditor {
+  min-height: 150px;
+  padding: 16px;
+  border: 1px solid #e6e9ef;
+  border-radius: 8px;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.previewEditor:focus {
+  border-color: #0073ea;
+}
+
+/* Save button */
+.btnSave {
+  background: #0073ea;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.btnSave:hover:not(:disabled) {
+  background: #0060c2;
+}
+
+.btnSave:disabled {
+  background: #c5c7d0;
+  cursor: not-allowed;
+}
+
+.btnSave .icon {
+  font-size: 16px;
+}
+
+/* Loading states */
+.loadingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #e6e9ef;
+  border-top-color: #0073ea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 
