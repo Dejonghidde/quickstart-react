@@ -40,7 +40,6 @@ const ITEM_Q_INT = `
   }
 `;
 
-
 /** ─────────────── Extract prompts + hooks o.b.v. kolomtitels ──────────────── */
 function extractPromptsAndHooks(cols = []) {
   const byTitle = (re) =>
@@ -122,111 +121,111 @@ export default function ItemPage() {
   const [mediaFiles, setMediaFiles] = React.useState([]); // [{id,name,thumbUrl,url}]
   const [mediaIdx, setMediaIdx] = React.useState(0);
 
-// --- Media upload + preview state ---
-const [uploaded, setUploaded] = React.useState([]);          // [{url, name, type, isLocal}]
-const [activeMediaIdx, setActiveMediaIdx] = React.useState(0);
-const activeMedia = React.useMemo(
-  () => uploaded[activeMediaIdx] || null,
-  [uploaded, activeMediaIdx]
-);
-
-// Vind de kolom-id van "Media" op basis van de kolomtitel (fallback: 'files')
-const mediaColumnId = React.useMemo(() => {
-  if (!item?.column_values) return null;
-
-  // 1. Hard match op de échte column id van de Media-kolom
-  const hard = item.column_values.find(cv => cv.id === "file_mkwyrehq");
-  if (hard) return hard.id;
-
-  // 2. Safety fallback: titel bevat "media"
-  const byTitle = item.column_values.find(cv =>
-    /media/i.test(cv?.column?.title || "")
+  // --- Media upload + preview state ---
+  const [uploaded, setUploaded] = React.useState([]);          // [{url, name, type, isLocal}]
+  const [activeMediaIdx, setActiveMediaIdx] = React.useState(0);
+  const activeMedia = React.useMemo(
+    () => uploaded[activeMediaIdx] || null,
+    [uploaded, activeMediaIdx]
   );
-  if (byTitle) return byTitle.id;
 
-  console.warn("⚠ mediaColumnId niet gevonden in item.column_values");
-  return null;
-}, [item]);
+  // Vind de kolom-id van "Media" op basis van de kolomtitel (fallback: 'files')
+  const mediaColumnId = React.useMemo(() => {
+    if (!item?.column_values) return null;
 
-// Zorg dat we een Int itemId hebben voor de mutatie
-const itemIdInt = React.useMemo(() => {
-  const raw = (item && item.id) || itemIdStr || "";
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? n : null;
-}, [item, itemIdStr]);
+    // 1. Hard match op de échte column id van de Media-kolom
+    const hard = item.column_values.find(cv => cv.id === "file_mkwyrehq");
+    if (hard) return hard.id;
 
-// ───────────────── Upload handler ─────────────────
-async function handleFilesPicked(fileList) {
-  const files = Array.from(fileList || []);
-  if (!files.length || !itemIdInt) return;
+    // 2. Safety fallback: titel bevat "media"
+    const byTitle = item.column_values.find(cv =>
+      /media/i.test(cv?.column?.title || "")
+    );
+    if (byTitle) return byTitle.id;
 
-  for (const file of files) {
-    // 1) Plaats een tijdelijke UI-kaart met een unieke sleutel
-    const objectUrl = URL.createObjectURL(file);
-    const tmpKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const isVideo = /^video\//i.test(file.type);
+    console.warn("⚠ mediaColumnId niet gevonden in item.column_values");
+    return null;
+  }, [item]);
 
-    // voeg placeholder toe en onthoud de index via de unieke sleutel
-    setUploaded(prev => [...prev, {
-      url: objectUrl,
-      name: file.name,
-      type: isVideo ? "video/*" : "image/*",
-      isLocal: true,
-      _tmpKey: tmpKey,           // ← unieke sleutel om later te vervangen
-    }]);
-    setActiveMediaIdx(i => Math.max(i, 0));
+  // Zorg dat we een Int itemId hebben voor de mutatie
+  const itemIdInt = React.useMemo(() => {
+    const raw = (item && item.id) || itemIdStr || "";
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+  }, [item, itemIdStr]);
 
-    try {
-// 2) Upload naar Monday (file column)  ⬅️ type fix: ID! en id als string
-const MUT = `
-  mutation add($file: File!, $itemId: ID!, $columnId: String!) {
-    add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
-  }
-`;
+  // ───────────────── Upload handler ─────────────────
+  async function handleFilesPicked(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length || !itemIdInt) return;
 
-const itemIdForMutation = String(item?.id ?? itemIdStr);   // <-- forceer string
-const r1 = await monday.api(MUT, {
-  variables: { file, itemId: itemIdForMutation, columnId: mediaColumnId }
-});
-const assetId = r1?.data?.add_file_to_column?.id;
-if (!assetId) throw new Error("Geen assetId terug van monday");
+    for (const file of files) {
+      // 1) Plaats een tijdelijke UI-kaart met een unieke sleutel
+      const objectUrl = URL.createObjectURL(file);
+      const tmpKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const isVideo = /^video\//i.test(file.type);
 
-      // 3) Haal publieke URL op (LET OP: ID!, niet Int!)
-      const Q = `
-        query ($ids:[ID!]) {
-          assets(ids:$ids){ id name public_url url url_thumbnail }
-        }`;
-      const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
-      const a = r2?.data?.assets?.[0];
-      if (!a) throw new Error("Asset details niet gevonden");
+      // voeg placeholder toe en onthoud de index via de unieke sleutel
+      setUploaded(prev => [...prev, {
+        url: objectUrl,
+        name: file.name,
+        type: isVideo ? "video/*" : "image/*",
+        isLocal: true,
+        _tmpKey: tmpKey,           // ← unieke sleutel om later te vervangen
+      }]);
+      setActiveMediaIdx(i => Math.max(i, 0));
 
-      // 4) Vervang de tijdelijke entry op basis van _tmpKey
-      setUploaded(prev => {
-        const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-        if (ix === -1) return prev;
+      try {
+        // 2) Upload naar Monday (file column)
+        const MUT = `
+          mutation add($file: File!, $itemId: ID!, $columnId: String!) {
+            add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
+          }
+        `;
 
-        const next = [...prev];
-        next[ix] = {
-          url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
-          name: a.name || file.name,
-          type: isVideo ? "video/*" : "image/*",
-          isLocal: false,
-        };
-        return next;
-      });
-    } catch (e) {
-      console.warn("Upload mislukt:", e);
-      // als upload faalt: laat placeholder staan maar haal 'uploading…' weg en markeer ‘(failed)’
-      setUploaded(prev => {
-        const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-        if (ix === -1) return prev;
-        const next = [...prev];
-        next[ix] = { ...next[ix], isLocal: false, name: `${file.name} (failed)` };
-        return next;
-      });
+        const itemIdForMutation = String(item?.id ?? itemIdStr);   // <-- forceer string
+        const r1 = await monday.api(MUT, {
+          variables: { file, itemId: itemIdForMutation, columnId: mediaColumnId }
+        });
+        const assetId = r1?.data?.add_file_to_column?.id;
+        if (!assetId) throw new Error("Geen assetId terug van monday");
+
+        // 3) Haal publieke URL op
+        const Q = `
+          query ($ids:[ID!]) {
+            assets(ids:$ids){ id name public_url url url_thumbnail }
+          }`;
+        const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
+        const a = r2?.data?.assets?.[0];
+        if (!a) throw new Error("Asset details niet gevonden");
+
+        // 4) Vervang de tijdelijke entry op basis van _tmpKey
+        setUploaded(prev => {
+          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+          if (ix === -1) return prev;
+
+          const next = [...prev];
+          next[ix] = {
+            url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
+            name: a.name || file.name,
+            type: isVideo ? "video/*" : "image/*",
+            isLocal: false,
+          };
+          return next;
+        });
+      } catch (e) {
+        console.warn("Upload mislukt:", e);
+        // als upload faalt: laat placeholder staan maar haal 'uploading…' weg en markeer ‘(failed)’
+        setUploaded(prev => {
+          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+          if (ix === -1) return prev;
+          const next = [...prev];
+          next[ix] = { ...next[ix], isLocal: false, name: `${file.name} (failed)` };
+          return next;
+        });
+      }
     }
   }
-}
 
   /** Data-load */
   React.useEffect(() => {
@@ -249,40 +248,40 @@ if (!assetId) throw new Error("Geen assetId terug van monday");
         setHooks(hooks);
         setActiveHookIdx(hooks.length ? 0 : null);
 
-// --- media: hydrate uploaded[] vanuit it.assets ---
-const assets = Array.isArray(it?.assets) ? it.assets : [];
+        // --- media: hydrate uploaded[] vanuit it.assets ---
+        const assets = Array.isArray(it?.assets) ? it.assets : [];
 
-const inferType = (a) => {
-  const n = (a?.name || "").toLowerCase();
-  const u = (a?.public_url || a?.url || a?.url_thumbnail || "").toLowerCase();
-  return /\.(mp4|mov|webm|ogg|m4v)$/.test(n) || /\.(mp4|mov|webm|ogg|m4v)$/.test(u)
-    ? "video/*"
-    : "image/*";
-};
+        const inferType = (a) => {
+          const n = (a?.name || "").toLowerCase();
+          const u = (a?.public_url || a?.url || a?.url_thumbnail || "").toLowerCase();
+          return /\.(mp4|mov|webm|ogg|m4v)$/.test(n) || /\.(mp4|mov|webm|ogg|m4v)$/.test(u)
+            ? "video/*"
+            : "image/*";
+        };
 
-const mapped = assets.map(a => ({
-  id: a.id, // <— belangrijk voor key
-  url: a.public_url || a.url || a.url_thumbnail || "",
-  name: a.name || "",
-  type: inferType(a),
-  isLocal: false,
-}));
+        const mapped = assets.map(a => ({
+          id: a.id, // <— belangrijk voor key
+          url: a.public_url || a.url || a.url_thumbnail || "",
+          name: a.name || "",
+          type: inferType(a),
+          isLocal: false,
+        }));
 
-setUploaded(mapped);
-setActiveMediaIdx(0);
+        setUploaded(mapped);
+        setActiveMediaIdx(0);
 
-// oude state (laat je huidige preview gewoon werken totdat we omschakelen)
-if (assets[0]) {
-  const a0 = assets[0];
-  setMedia({
-    name: a0.name,
-    thumbUrl: a0.url_thumbnail || a0.url || a0.public_url,
-  });
-  setMediaLabel(a0.name || "");
-} else {
-  setMedia(null);
-  setMediaLabel("");
-}
+        // oude state (laat je huidige preview gewoon werken totdat we omschakelen)
+        if (assets[0]) {
+          const a0 = assets[0];
+          setMedia({
+            name: a0.name,
+            thumbUrl: a0.url_thumbnail || a0.url || a0.public_url,
+          });
+          setMediaLabel(a0.name || "");
+        } else {
+          setMedia(null);
+          setMediaLabel("");
+        }
       } catch (e) {
         setErr(String(e));
       } finally {
@@ -310,176 +309,170 @@ if (assets[0]) {
   const displayBoardName = item?.board?.name ?? "—";
   const displayBoardId = item?.board?.id ?? "—";
 
-// Leeg de files-kolom op Monday (eerst officieel, zo nodig fallback)
-async function clearMediaOnMonday() {
-  // 1. Check of we een geldig itemId hebben
-  const rawId = item?.id ?? itemIdStr;
-  if (!rawId) {
-    console.warn("clearMediaOnMonday: geen geldig itemId (item?.id / itemIdStr is leeg)");
-    return;
-  }
+  // Leeg de files-kolom op Monday (eerst officieel, zo nodig fallback)
+  async function clearMediaOnMonday() {
+    // 1. Check of we een geldig itemId hebben
+    const rawId = item?.id ?? itemIdStr;
+    if (!rawId) {
+      console.warn("clearMediaOnMonday: geen geldig itemId (item?.id / itemIdStr is leeg)");
+      return;
+    }
 
-  // 2. Check of we een geldige mediaColumnId hebben (bv. "file_mkwyrehq")
-  if (!mediaColumnId) {
-    console.warn("clearMediaOnMonday: geen mediaColumnId, stop");
-    return;
-  }
+    // 2. Check of we een geldige mediaColumnId hebben (bv. "file_mkwyrehq")
+    if (!mediaColumnId) {
+      console.warn("clearMediaOnMonday: geen mediaColumnId, stop");
+      return;
+    }
 
-  const itemIdForMutation = String(rawId);
+    const itemIdForMutation = String(rawId);
 
-  console.log("clearMediaOnMonday() start", {
-    itemIdForMutation,
-    mediaColumnId,
-  });
-
-  // --- POGING 1: officiële clear_item_files mutation ---
-  try {
-    const M1 = `
-      mutation ($itemId: ID!, $columnId: String!) {
-        clear_item_files(item_id: $itemId, column_id: $columnId) {
-          id
-        }
-      }`;
-
-    const res1 = await monday.api(M1, {
-      variables: {
-        itemId: itemIdForMutation,
-        columnId: mediaColumnId,
-      },
+    console.log("clearMediaOnMonday() start", {
+      itemIdForMutation,
+      mediaColumnId,
     });
 
-    if (res1?.error || !res1?.data?.clear_item_files?.id) {
-      throw new Error(res1?.error || 'Failed to clear files');
+    // --- POGING 1: officiële clear_item_files mutation ---
+    try {
+      const M1 = `
+        mutation ($itemId: ID!, $columnId: String!) {
+          clear_item_files(item_id: $itemId, column_id: $columnId) {
+            id
+          }
+        }`;
+
+      const res1 = await monday.api(M1, {
+        variables: {
+          itemId: itemIdForMutation,
+          columnId: mediaColumnId,
+        },
+      });
+
+      if (res1?.error || !res1?.data?.clear_item_files?.id) {
+        throw new Error(res1?.error || 'Failed to clear files');
+      }
+
+      console.log("M1 response:", res1);
+      return true; // Indicate success
+    } catch (err) {
+      console.warn("M1 clear_item_files faalde, probeer fallback…", err);
     }
 
-    console.log("M1 response:", res1);
-    return true; // Indicate success
-  } catch (err) {
-    console.warn("M1 clear_item_files faalde, probeer fallback…", err);
+    // --- POGING 2: fallback via change_simple_column_value ---
+    try {
+      const M2 = `
+        mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
+          change_simple_column_value(
+            item_id: $itemId,
+            column_id: $columnId,
+            value: $val
+          ) {
+            id
+          }
+        }`;
+
+      // Belangrijk verschil:
+      // Files-kolom leegmaken = lege array "[]", niet "{}"
+      const res2 = await monday.api(M2, {
+        variables: {
+          itemId: itemIdForMutation,
+          columnId: mediaColumnId,
+          val: "[]",
+        },
+      });
+
+      if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
+        throw new Error(res2?.error || 'Failed to clear files via fallback');
+      }
+
+      console.log("M2 response:", res2);
+      return true; // Indicate success
+    } catch (err2) {
+      console.error("Fallback M2 faalde ook:", err2);
+      throw err2; // Re-throw to handle in calling function
+    }
   }
 
-  // --- POGING 2: fallback via change_simple_column_value ---
-  try {
-    const M2 = `
-      mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
-        change_simple_column_value(
-          item_id: $itemId,
-          column_id: $columnId,
-          value: $val
-        ) {
-          id
-        }
-      }`;
+  // UI + Monday in één keer opschonen
+  async function handleClearAllMedia() {
+    try {
+      const success = await clearMediaOnMonday();
+      if (success) {
+        setUploaded([]);
+        setActiveMediaIdx(0);
+      } else {
+        console.error("Failed to clear media on Monday.com");
+        setErr("Failed to clear media on Monday.com");
+      }
+    } catch (error) {
+      console.error("Error clearing media:", error);
+      setErr(`Error clearing media: ${error.message}`);
+    }
+  }
 
-    // Belangrijk verschil:
-    // Files-kolom leegmaken = lege array "[]", niet "{}"
-    const res2 = await monday.api(M2, {
-      variables: {
-        itemId: itemIdForMutation,
-        columnId: mediaColumnId,
-        val: "[]",
-      },
-    });
+  const previewRef = React.useRef(null);
+  const [isSavingPreview, setIsSavingPreview] = React.useState(false);
+  const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
 
-    if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
-      throw new Error(res2?.error || 'Failed to clear files via fallback');
+  async function savePreviewToMonday() {
+    if (!item && !itemIdStr) {
+      setErr("Geen itemId om op te slaan");
+      return;
     }
 
-    console.log("M2 response:", res2);
-    return true; // Indicate success
-  } catch (err2) {
-    console.error("Fallback M2 faalde ook:", err2);
-    throw err2; // Re-throw to handle in calling function
-  }
-}
+    const previewCol = (item?.column_values || []).find(cv =>
+      /preview|linkedin/i.test(cv?.column?.title || "")
+    )?.id || "preview_text"; // replace "preview_text" with your real column id if known
 
-// UI + Monday in één keer opschonen
-async function handleClearAllMedia() {
-  try {
-    const success = await clearMediaOnMonday();
-    if (success) {
-      setUploaded([]);
-      setActiveMediaIdx(0);
-    } else {
-      console.error("Failed to clear media on Monday.com");
-      // Optionally show error to user
-      setErr("Failed to clear media on Monday.com");
+    const currentText = (previewRef.current ? previewRef.current.innerText : effectivePreview || "").trim();
+
+    setIsSavingPreview(true);
+    setErr(null);
+
+    try {
+      const MUT = `
+        mutation ($itemId: ID!, $columnId: String!, $value: JSON!) {
+          change_simple_column_value(item_id: $itemId, column_id: $columnId, value: $value) {
+            id
+          }
+        }`;
+
+      const variables = {
+        itemId: String(item?.id ?? itemIdStr),
+        columnId: previewCol,
+        value: JSON.stringify(currentText)
+      };
+
+      const res = await monday.api(MUT, { variables });
+
+      if (res?.error || !res?.data?.change_simple_column_value?.id) {
+        throw new Error(res?.error || "Monday API returned no id");
+      }
+
+      setItem(prev => {
+        if (!prev) return prev;
+        const next = { ...prev };
+        next.column_values = (prev.column_values || []).map(cv =>
+          cv.id === previewCol ? { ...cv, text: currentText } : cv
+        );
+        return next;
+      });
+
+      setPreviewSavedAt(new Date());
+    } catch (e) {
+      console.error("Failed saving preview to Monday:", e);
+      setErr(String(e));
+    } finally {
+      setIsSavingPreview(false);
     }
-  } catch (error) {
-    console.error("Error clearing media:", error);
-    // Optionally show error to user
-    setErr(`Error clearing media: ${error.message}`);
   }
-}
-
-const previewRef = React.useRef(null);
-const [isSavingPreview, setIsSavingPreview] = React.useState(false);
-const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
-
-async function savePreviewToMonday() {
-  if (!item && !itemIdStr) {
-    setErr("Geen itemId om op te slaan");
-    return;
-  }
-
-  // 1) find a suitable column id (tweak the regex / fallback to explicit id)
-  const previewCol = (item?.column_values || []).find(cv =>
-    /preview|linkedin/i.test(cv?.column?.title || "")
-  )?.id || "preview_text"; // replace "preview_text" with your real column id if known
-
-  // 2) get the current text from the editable div (source of truth)
-  const currentText = (previewRef.current ? previewRef.current.innerText : effectivePreview || "").trim();
-
-  setIsSavingPreview(true);
-  setErr(null);
-
-  try {
-    const MUT = `
-      mutation ($itemId: ID!, $columnId: String!, $value: JSON!) {
-        change_simple_column_value(item_id: $itemId, column_id: $columnId, value: $value) {
-          id
-        }
-      }`;
-
-    // change_simple_column_value expects the 'value' param as JSON — send a JSON string
-    const variables = {
-      itemId: String(item?.id ?? itemIdStr),
-      columnId: previewCol,
-      value: JSON.stringify(currentText)
-    };
-
-    const res = await monday.api(MUT, { variables });
-
-    if (res?.error || !res?.data?.change_simple_column_value?.id) {
-      throw new Error(res?.error || "Monday API returned no id");
-    }
-
-    // update local item state so UI reflects saved value (optional but useful)
-    setItem(prev => {
-      if (!prev) return prev;
-      const next = { ...prev };
-      next.column_values = (prev.column_values || []).map(cv =>
-        cv.id === previewCol ? { ...cv, text: currentText } : cv
-      );
-      return next;
-    });
-
-    setPreviewSavedAt(new Date());
-  } catch (e) {
-    console.error("Failed saving preview to Monday:", e);
-    setErr(String(e));
-  } finally {
-    setIsSavingPreview(false);
-  }
-}
 
   /** Render */
   if (!itemIdStr) {
     return (
       <div className="wrap">
-<button type="button" className="btnBack" onClick={() => window.history.back()}>
-  ← Terug
-</button>
+        <button type="button" className="btnBack" onClick={() => window.history.back()}>
+          ← Terug
+        </button>
         <div className="meta" style={{ marginTop: 12 }}>Geen itemId in URL.</div>
       </div>
     );
@@ -518,276 +511,213 @@ async function savePreviewToMonday() {
                 ))}
               </div>
             </div>
-<div className="cardBody">
-  <div
-    className="promptBox preWrap"
-    aria-label={`Prompt ${activePromptIdx + 1}`}
-  >
-    {activePromptText
-      ? activePromptText
-      : <span className="muted">Geen tekst voor deze prompt.</span>}
-  </div>
-</div>
-</div> 
-
-{/* ───────── Hooks (verticale, aanklikbare cards) ───────── */}
-<div className="card" style={{ marginTop: 16 }}>
-  <div className="sectionTitle">Hooks</div>
-
-  {hooks.length ? (
-    <div className="hookList" style={{ marginTop: 8 }}>
-      {hooks.map((h, i) => (
-<label
-  key={i}
-  className={`hookRow ${activeHookIdx === i ? "active" : ""}`}
->
-  <input
-    type="radio"
-    name="hook"
-    checked={activeHookIdx === i}
-    onChange={() => {
-      setActiveHookIdx(i);
-      if (!isDirty) setPreviewOverride("");
-    }}
-  />
-  <span className="hookBadge">#{i + 1}</span>
-  <span className="hookText">{h}</span>
-</label>
-      ))}
-    </div>
-  ) : (
-    <div className="hint" style={{ marginTop: 8 }}>Geen hooks gevonden.</div>
-  )}
-</div>
-
-{/* ───────── Media Attachment (tussen Hooks en Preview) ───────── */}
-<div className="card" style={{ marginTop: 16 }}>
-  <div className="sectionTitle">Media Attachment</div>
-
-  <label className="dropZone">
-    <input
-      type="file"
-      multiple
-      accept="image/*,video/*"
-      style={{ display: "none" }}
-      onChange={(e) => handleFilesPicked(e.target.files)}
-    />
-    <div className="dzInner">
-      <div className="dzIcon">🖼️</div>
-      <div>Drop files here or click to browse</div>
-      <div className="dzSub">Images and videos supported</div>
-    </div>
-  </label>
-
-  {/* B: Alles verwijderen knop */}
-  <div className="mediaToolbar">
-    <button
-      type="button"
-      className="linkBtn danger"
-      disabled={!uploaded.length}
-      onClick={handleClearAllMedia}
-      title="Verwijder alle geüploade media uit dit item"
-    >
-      Verwijder alle media
-    </button>
-  </div>
-          
-
-  {/* Bestandenlijst (alleen tonen als er items zijn) */}
-  {uploaded.length > 0 && (
-    <div className="mediaList">
-      {uploaded.map((m, ix) => (
-        <div
-          key={(m.id || m.url) + ix}
-          className={`mediaRow ${ix === activeMediaIdx ? "is-active" : ""}`}
-          role="button"
-          tabIndex={0}
-          onClick={() => setActiveMediaIdx(ix)}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveMediaIdx(ix)}
-        >
-          <div className="mediaMeta">
-            <span className="mediaType" title={m.type || ""}>
-              {m.type && m.type.startsWith("video") ? "🎬" : "🖼️"}
-            </span>
-            <span className="mediaName" title={m.name || "(naamloos)"}>
-              {m.name || "(naamloos)"}
-            </span>
-            {m.isLocal && <span className="badge">uploading…</span>}
+            <div className="cardBody">
+              <div
+                className="promptBox preWrap"
+                aria-label={`Prompt ${activePromptIdx + 1}`}
+              >
+                {activePromptText
+                  ? activePromptText
+                  : <span className="muted">Geen tekst voor deze prompt.</span>}
+              </div>
+            </div>
           </div>
 
-          <div className="mediaActions">
+          {/* ───────── Hooks (verticale, aanklikbare cards) ───────── */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="sectionTitle">Hooks</div>
+
+            {hooks.length ? (
+              <div className="hookList" style={{ marginTop: 8 }}>
+                {hooks.map((h, i) => (
+                  <label
+                    key={i}
+                    className={`hookRow ${activeHookIdx === i ? "active" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="hook"
+                      checked={activeHookIdx === i}
+                      onChange={() => {
+                        setActiveHookIdx(i);
+                        if (!isDirty) setPreviewOverride("");
+                      }}
+                    />
+                    <span className="hookBadge">#{i + 1}</span>
+                    <span className="hookText">{h}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div className="hint" style={{ marginTop: 8 }}>Geen hooks gevonden.</div>
+            )}
+          </div>
+
+          {/* ───────── Media Attachment (tussen Hooks en Preview) ───────── */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="sectionTitle">Media Attachment</div>
+
+            <label className="dropZone">
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                style={{ display: "none" }}
+                onChange={(e) => handleFilesPicked(e.target.files)}
+              />
+              <div className="dzInner">
+                <div className="dzIcon">🖼️</div>
+                <div>Drop files here or click to browse</div>
+                <div className="dzSub">Images and videos supported</div>
+              </div>
+            </label>
+
+            {/* B: Alles verwijderen knop */}
+            <div className="mediaToolbar">
+              <button
+                type="button"
+                className="linkBtn danger"
+                disabled={!uploaded.length}
+                onClick={handleClearAllMedia}
+                title="Verwijder alle geüploade media uit dit item"
+              >
+                Verwijder alle media
+              </button>
+            </div>
+
+            {/* Bestandenlijst (alleen tonen als er items zijn) */}
+            {uploaded.length > 0 && (
+              <div className="mediaList">
+                {uploaded.map((m, ix) => (
+                  <div
+                    key={(m.id || m.url) + ix}
+                    className={`mediaRow ${ix === activeMediaIdx ? "is-active" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveMediaIdx(ix)}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveMediaIdx(ix)}
+                  >
+                    <div className="mediaMeta">
+                      <span className="mediaType" title={m.type || ""}>
+                        {m.type && m.type.startsWith("video") ? "🎬" : "🖼️"}
+                      </span>
+                      <span className="mediaName" title={m.name || "(naamloos)"}>
+                        {m.name || "(naamloos)"}
+                      </span>
+                      {m.isLocal && <span className="badge">uploading…</span>}
+                    </div>
+
+                    <div className="mediaActions">
+                      <button
+                        type="button"
+                        className="linkBtn danger"
+                        onClick={(e) => {
+                          e.stopPropagation(); // voorkom activeren van de rij bij klikken op Verwijder
+                          setUploaded((prev) => {
+                            const next = prev.filter((_, i) => i !== ix);
+                            // corrigeer actieve index
+                            if (ix === activeMediaIdx) {
+                              const newIdx = Math.min(Math.max(0, ix - 1), next.length - 1);
+                              setActiveMediaIdx(next.length ? newIdx : 0);
+                            } else if (ix < activeMediaIdx) {
+                              setActiveMediaIdx((i) => Math.max(0, i - 1));
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        Verwijder
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ───────── Preview (LinkedIn-stijl) ───────── */}
+          <div className="li-card" style={{ marginTop: 16 }}>
+            <div className="liHeader">
+              <div className="liAvatar">YN</div>
+              <div className="liHeadText">
+                <div className="liWho">Your Name</div>
+                <div className="liSub">Just now • 🌐</div>
+              </div>
+            </div>
+
+            <div className="liBody">
+              {/* Eén enkel vlak, geen tweede ‘card’ eronder */}
+              <div
+                ref={previewRef}
+                className="liPostText"
+                contentEditable
+                suppressContentEditableWarning
+                onInput={(e) => {
+                  setIsDirty(true);
+                  setPreviewOverride(e.currentTarget.innerText);
+                }}
+              >
+                {(isDirty ? previewOverride : effectivePreview) || "Voorvertoning verschijnt hier…"}
+              </div>
+            </div>
+
+            {activeMedia ? (
+              <div className="liMedia" style={{ position: "relative" }}>
+                {activeMedia.type && activeMedia.type.startsWith("video")
+                  ? <video controls src={activeMedia.url} />
+                  : <img src={activeMedia.url} alt={activeMedia.name || "media"} />}
+                {uploaded.length > 1 && (
+                  <div className="mediaNav">
+                    <button
+                      type="button"
+                      onClick={() => setActiveMediaIdx(i => (i - 1 + uploaded.length) % uploaded.length)}
+                      aria-label="Previous media"
+                    >
+                      ‹
+                    </button>
+                    <span>{activeMediaIdx + 1}/{uploaded.length}</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveMediaIdx(i => (i + 1) % uploaded.length)}
+                      aria-label="Next media"
+                    >
+                      ›
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="liMedia liMedia--empty">
+                <div className="liMediaPlaceholder">
+                  <span className="liMediaIcon">🖼️</span>
+                  <span>No media attached</span>
+                </div>
+              </div>
+            )}
+
+            {/* Onderste balk zoals op LinkedIn */}
+            <div className="liActions">
+              <button className="liAction">👍 Like</button>
+              <button className="liAction">💬 Comment</button>
+              <button className="liAction">🔗 Share</button>
+              <button className="liAction">✉️ Send</button>
+            </div>
+          </div>
+
+          {/* Save button */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
             <button
               type="button"
-              className="linkBtn danger"
-              onClick={(e) => {
-                e.stopPropagation(); // voorkom activeren van de rij bij klikken op Verwijder
-                setUploaded((prev) => {
-                  const next = prev.filter((_, i) => i !== ix);
-                  // corrigeer actieve index
-                  if (ix === activeMediaIdx) {
-                    const newIdx = Math.min(Math.max(0, ix - 1), next.length - 1);
-                    setActiveMediaIdx(next.length ? newIdx : 0);
-                  } else if (ix < activeMediaIdx) {
-                    setActiveMediaIdx((i) => Math.max(0, i - 1));
-                  }
-                  return next;
-                });
-              }}              async function clearMediaOnMonday() {
-                // ...existing code...
-              
-                // --- POGING 1: officiële clear_item_files mutation ---
-                try {
-                  const M1 = `
-                    mutation ($itemId: ID!, $columnId: String!) {
-                      clear_item_files(item_id: $itemId, column_id: $columnId) {
-                        id
-                      }
-                    }`;
-              
-                  const res1 = await monday.api(M1, {
-                    variables: {
-                      itemId: itemIdForMutation,
-                      columnId: mediaColumnId,
-                    },
-                  });
-              
-                  if (res1?.error || !res1?.data?.clear_item_files?.id) {
-                    throw new Error(res1?.error || 'Failed to clear files');
-                  }
-              
-                  console.log("M1 response:", res1);
-                  return true; // Indicate success
-                } catch (err) {
-                  console.warn("M1 clear_item_files faalde, probeer fallback…", err);
-                }
-              
-                // --- POGING 2: fallback via change_simple_column_value ---
-                try {
-                  const M2 = `
-                    mutation ($itemId: ID!, $columnId: String!, $val: JSON!) {
-                      change_simple_column_value(
-                        item_id: $itemId,
-                        column_id: $columnId,
-                        value: $val
-                      ) {
-                        id
-                      }
-                    }`;
-              
-                  const res2 = await monday.api(M2, {
-                    variables: {
-                      itemId: itemIdForMutation,
-                      columnId: mediaColumnId,
-                      val: "[]",
-                    },
-                  });
-              
-                  if (res2?.error || !res2?.data?.change_simple_column_value?.id) {
-                    throw new Error(res2?.error || 'Failed to clear files via fallback');
-                  }
-              
-                  console.log("M2 response:", res2);
-                  return true; // Indicate success
-                } catch (err2) {
-                  console.error("Fallback M2 faalde ook:", err2);
-                  throw err2; // Re-throw to handle in calling function
-                }
-              }
+              onClick={savePreviewToMonday}
+              disabled={isSavingPreview}
+              className="linkBtn"
             >
-              Verwijder
+              {isSavingPreview ? "Saving…" : "Save preview"}
             </button>
+            {previewSavedAt && <span style={{ fontSize: 12, color: "#666" }}>Saved {previewSavedAt.toLocaleTimeString()}</span>}
           </div>
-        </div>
-      ))}
+        </>
+      )}
     </div>
-  )}
-</div>
-
-{/* ───────── Preview (LinkedIn-stijl) ───────── */}
-<div className="li-card" style={{ marginTop: 16 }}>
-  <div className="liHeader">
-    <div className="liAvatar">YN</div>
-    <div className="liHeadText">
-      <div className="liWho">Your Name</div>
-      <div className="liSub">Just now • 🌐</div>
-    </div>
-  </div>
-
-  <div className="liBody">
-    {/* Eén enkel vlak, geen tweede ‘card’ eronder */}
-    <div
-      ref={previewRef}
-      className="liPostText"
-      contentEditable
-      suppressContentEditableWarning
-      onInput={(e) => {
-        setIsDirty(true);
-        setPreviewOverride(e.currentTarget.innerText);
-      }}
-    >
-      {(isDirty ? previewOverride : effectivePreview) || "Voorvertoning verschijnt hier…"}
-    </div>
-  </div>
-
-{activeMedia ? (
-  <div className="liMedia" style={{ position: "relative" }}>
-    {activeMedia.type && activeMedia.type.startsWith("video")
-      ? <video controls src={activeMedia.url} />
-      : <img src={activeMedia.url} alt={activeMedia.name || "media"} />}
-    {uploaded.length > 1 && (
-      <div className="mediaNav">
-        <button
-          type="button"
-          onClick={() => setActiveMediaIdx(i => (i - 1 + uploaded.length) % uploaded.length)}
-          aria-label="Previous media"
-        >
-          ‹
-        </button>
-        <span>{activeMediaIdx + 1}/{uploaded.length}</span>
-        <button
-          type="button"
-          onClick={() => setActiveMediaIdx(i => (i + 1) % uploaded.length)}
-          aria-label="Next media"
-        >
-          ›
-        </button>
-      </div>
-    )}
-  </div>
-) : (
-  <div className="liMedia liMedia--empty">
-    <div className="liMediaPlaceholder">
-      <span className="liMediaIcon">🖼️</span>
-      <span>No media attached</span>
-    </div>
-  </div>
-)}
-
-{/* Onderste balk zoals op LinkedIn */}
-    <div className="liActions">
-      <button className="liAction">👍 Like</button>   
-      <button className="liAction">💬 Comment</button>
-      <button className="liAction">🔗 Share</button>
-      <button className="liAction">✉️ Send</button>
-    </div>
-  </div>
-  
-  {/* Save button */}
-  <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
-    <button
-      type="button"
-      onClick={savePreviewToMonday}
-      disabled={isSavingPreview}
-      className="linkBtn"
-    >
-      {isSavingPreview ? "Saving…" : "Save preview"}
-    </button>
-    {previewSavedAt && <span style={{ fontSize: 12, color: "#666" }}>Saved {previewSavedAt.toLocaleTimeString()}</span>}
-  </div>
-  
-  </>
-)}
-
-</div>
-);
+  );
 }
