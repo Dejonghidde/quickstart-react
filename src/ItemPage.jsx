@@ -584,7 +584,6 @@ export default function ItemPage() {
                       </span>
                       {m.isLocal && <span className="badge">uploading…</span>}
                     </div>
-                    </div>
                   </div>
                 ))}
               </div>
