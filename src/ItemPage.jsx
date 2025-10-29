@@ -461,7 +461,7 @@ export default function ItemPage() {
     }
   }
 
-  // Replace the savePreviewToMonday function
+  // Then update the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
       toast.error("Missing item ID or board ID");
