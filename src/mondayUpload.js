@@ -1,3 +1,5 @@
+import monday from "./monday";
+
 export async function uploadFileToMonday({ file, itemId, columnId }) {
   const form = new FormData();
 
@@ -47,7 +49,6 @@ export async function uploadFileToMonday({ file, itemId, columnId }) {
   if (!assetId) throw new Error("No asset ID returned after upload");
 
   // Resolve asset details via monday.api (SDK) to get public_url / thumbnail
-  const monday = await import("./monday");
   const resp = await monday.api(
     `
       query($ids: [ID!]!) {
