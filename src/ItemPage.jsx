@@ -3,8 +3,6 @@ import monday from "./monday";
 import { uploadFileToMonday } from "./mondayUpload";
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingIndicator from './components/LoadingIndicator';
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import "./ui.css";
 
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
@@ -165,15 +163,7 @@ export default function ItemPage() {
   // ───────────────── Upload handler ─────────────────
   async function handleFilesPicked(fileList = []) {
     const files = Array.from(fileList || []);
-    if (!files.length || !itemIdInt) {
-      toast.error('No files selected or invalid item ID');
-      return;
-    }
-
-    const clientToken =
-      (typeof process !== "undefined" && process.env.REACT_APP_MONDAY_API_TOKEN) ||
-      (monday?.getClientApiToken ? monday.getClientApiToken() : null) ||
-      null;
+    if (!files.length || !itemIdInt) return;
 
     for (const file of files) {
       const objectUrl = URL.createObjectURL(file);
@@ -186,83 +176,57 @@ export default function ItemPage() {
         type: isVideo ? "video/*" : "image/*",
         isLocal: true,
         _tmpKey: tmpKey,
+        status: 'uploading'
       }]);
-      setActiveMediaIdx(i => Math.max(i, 0));
 
       try {
-        const toastId = toast.loading(`Uploading ${file.name}...`);
-        let assetId = null;
-        
-        try {
-          if (clientToken) {
-            assetId = await uploadFileToMonday({
-              file,
-              itemId: String(item?.id ?? itemIdStr),
-              columnId: mediaColumnId,
-              apiToken: clientToken,
-            });
-          } else {
-            const MUT = `
-              mutation add($file: File!, $itemId: ID!, $columnId: String!) {
-                add_file_to_column(file: $file, item_id: $itemId, column_id: $columnId) { id }
-              }
-            `;
-            const r1 = await monday.api(MUT, {
-              variables: { file, itemId: String(item?.id ?? itemIdStr), columnId: mediaColumnId }
-            });
-            assetId = r1?.data?.add_file_to_column?.id;
-          }
+        const asset = await uploadFileToMonday({
+          file,
+          itemId: String(item?.id ?? itemIdStr),
+          columnId: mediaColumnId
+        });
 
-          if (!assetId) throw new Error("No asset ID returned from Monday");
-
-          // Get public URL
-          const Q = `
-            query ($ids: [ID!]!) {
-              assets(ids: $ids){ id name public_url url url_thumbnail }
-            }`;
-          const r2 = await monday.api(Q, { variables: { ids: [String(assetId)] } });
-          const a = r2?.data?.assets?.[0];
-          if (!a) throw new Error("Asset details not found");
-
-          setUploaded(prev => {
-            const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-            if (ix === -1) return prev;
-            const next = [...prev];
-            next[ix] = {
-              url: a.public_url || a.url || a.url_thumbnail || next[ix].url,
-              name: a.name || file.name,
-              type: isVideo ? "video/*" : "image/*",
-              isLocal: false,
-            };
-            return next;
-          });
-
-          toast.update(toastId, {
-            render: `${file.name} uploaded successfully`,
-            type: 'success',
-            isLoading: false,
-            autoClose: 3000,
-          });
-        } catch (e) {
-          console.error("Upload failed:", e);
-          toast.update(toastId, {
-            render: `Failed to upload ${file.name}: ${e.message}`,
-            type: 'error',
-            isLoading: false,
-            autoClose: 5000,
-          });
+        setUploaded(prev => {
+          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+          if (ix === -1) return prev;
           
-          setUploaded(prev => {
-            const ix = prev.findIndex(p => p._tmpKey === tmpKey);
-            if (ix === -1) return prev;
-            const next = [...prev];
-            next[ix] = { ...next[ix], isLocal: false, name: `${file.name} (failed)` };
-            return next;
-          });
-        }
-      } catch (e) {
-        console.error("File processing error:", e);
-        toast.error(`Error processing ${file.name}: ${e.message}`);
+          const next = [...prev];
+          next[ix] = {
+            url: asset.public_url || asset.url || asset.url_thumbnail,
+            name: asset.name || file.name,
+            type: isVideo ? "video/*" : "image/*",
+            isLocal: false,
+            status: 'success'
+          };
+          return next;
+        });
+
+        monday.execute('notice', { 
+          message: `Uploaded: ${file.name}`,
+          type: 'success',
+          timeout: 5000
+        });
+      } catch (err) {
+        console.error("Upload failed:", err);
+        setUploaded(prev => {
+          const ix = prev.findIndex(p => p._tmpKey === tmpKey);
+          if (ix === -1) return prev;
+          
+          const next = [...prev];
+          next[ix] = {
+            ...next[ix],
+            isLocal: false,
+            status: 'error',
+            error: err.message
+          };
+          return next;
+        });
+        
+        monday.execute('notice', { 
+          message: `Upload failed: ${file.name}`,
+          type: 'error',
+          timeout: 5000
+        });
       }
     }
   }
@@ -464,7 +428,11 @@ export default function ItemPage() {
   // Then update the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
-      toast.error("Missing item ID or board ID");
+      monday.execute('notice', {
+        message: "Missing item ID or board ID",
+        type: 'error',
+        timeout: 5000
+      });
       return;
     }
 
@@ -476,7 +444,11 @@ export default function ItemPage() {
 
     if (!column) {
       console.warn("Available columns:", item?.column_values);
-      toast.error("Preview kolom niet gevonden");
+      monday.execute('notice', {
+        message: "Preview kolom niet gevonden",
+        type: 'error',
+        timeout: 5000
+      });
       return;
     }
 
@@ -533,10 +505,18 @@ export default function ItemPage() {
       setIsDirty(false);
       setPreviewOverride("");
       setPreviewSavedAt(new Date());
-      toast.success("Preview saved successfully");
+      monday.execute('notice', {
+        message: "Preview saved successfully",
+        type: 'success',
+        timeout: 5000
+      });
     } catch (err) {
       console.error("Save failed:", err);
-      toast.error(`Save failed: ${err.message || 'Unknown error'}`);
+      monday.execute('notice', {
+        message: `Save failed: ${err.message || 'Unknown error'}`,
+        type: 'error',
+        timeout: 5000
+      });
     } finally {
       setIsSavingPreview(false);
     }
@@ -546,18 +526,6 @@ export default function ItemPage() {
   return (
     <ErrorBoundary>
       <div className="wrap">
-        <ToastContainer 
-          position="top-right"
-          autoClose={5000}
-          hideProgressBar={false}
-          newestOnTop={false}
-          closeOnClick
-          rtl={false}
-          pauseOnFocusLoss
-          draggable
-          pauseOnHover
-          theme="light"
-        />
         
         {!itemIdStr ? (
           <>
