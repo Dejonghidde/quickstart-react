@@ -47,8 +47,9 @@ export async function uploadFileToMonday({ file, itemId, columnId }) {
   if (!assetId) throw new Error("No asset ID returned after upload");
 
   // Resolve asset details via monday.api (SDK) to get public_url / thumbnail
-  try {
-    const query = `
+  const monday = await import("./monday");
+  const resp = await monday.api(
+    `
       query($ids: [ID!]!) {
         assets(ids: $ids) {
           id
@@ -57,13 +58,10 @@ export async function uploadFileToMonday({ file, itemId, columnId }) {
           public_url
           url_thumbnail
         }
-      }`;
-    const resp = await (await import("./monday")).default.api(query, { variables: { ids: [String(assetId)] } });
-    const asset = resp?.data?.assets?.[0] || null;
-    return asset || { id: assetId };
-  } catch (err) {
-    // Return basic info if asset details lookup fails
-    console.warn("Could not fetch asset details:", err);
-    return { id: assetId };
-  }
+      }`,
+    { variables: { ids: [String(assetId)] } }
+  );
+  const asset = resp?.data?.assets?.[0] || null;
+
+  return asset || { id: assetId };
 }
