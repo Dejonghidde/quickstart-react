@@ -18,6 +18,7 @@
     "@mondaycom/apps-sdk": "^0.1.1",
     "@vibe/core": "^3.19.0",
     "monday-sdk-js": "^0.5.6",
+    "react-toastify": "^11.0.5",
     "serve": "^14.2.5"
   },
   "eslintConfig": {

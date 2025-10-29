@@ -5,8 +5,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import LoadingIndicator from './components/LoadingIndicator';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import "./ui.css";
 
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
@@ -102,7 +100,6 @@ async function fetchItemSmart(itemIdStr) {
 
 /** ────────────────────────────── Component ──────────────────────────────── */
 export default function ItemPage() {
-  // Existing state and handlers...
   const itemIdStr = useItemIdFromHash();
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState(null);
@@ -122,6 +119,7 @@ export default function ItemPage() {
   // Preview-override (vrije bewerking)
   const [isDirty, setIsDirty] = React.useState(false);
   const [previewOverride, setPreviewOverride] = React.useState("");
+  const previewRef = React.useRef(null);
 
   // Media (eerste asset)
   const [media, setMedia] = React.useState(null);
@@ -421,10 +419,6 @@ export default function ItemPage() {
     }
   }
 
-  const previewRef = React.useRef(null);
-  const [isSavingPreview, setIsSavingPreview] = React.useState(false);
-  const [previewSavedAt, setPreviewSavedAt] = React.useState(null);
-
   // keep a reliable preview column id (prefer the exact internal id you provided)
   const previewColumnId = React.useMemo(() => {
     if (!item?.column_values) return null;
@@ -447,6 +441,26 @@ export default function ItemPage() {
     }
   }, [effectivePreview, isDirty]);
 
+  // Add this helper function at the top
+  function createColumnValue(columnType, text, existingValue = null) {
+    switch (columnType) {
+      case 'text':
+        return JSON.stringify({ text });
+      
+      case 'board-relation':
+        const existing = existingValue ? JSON.parse(existingValue) : {};
+        return JSON.stringify({
+          linkedPulseIds: existing.linkedPulseIds || [],
+          update: {
+            text: text
+          }
+        });
+      
+      default:
+        return JSON.stringify({ text });
+    }
+  }
+
   // Replace the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
@@ -454,10 +468,15 @@ export default function ItemPage() {
       return;
     }
 
-    const column = getColumnDetails(item.column_values);
+    const column = item.column_values.find(cv =>
+      cv.id === "board_relation_mkw9ah6f" ||
+      cv.id === "text_mkx3qq8w" ||
+      /linkedin|preview/i.test(cv?.column?.title || "")
+    );
+
     if (!column) {
-      console.warn("Available columns:", item.column_values);
-      toast.error("Preview column not found");
+      console.warn("Available columns:", item?.column_values);
+      toast.error("Preview kolom niet gevonden");
       return;
     }
 
@@ -465,58 +484,35 @@ export default function ItemPage() {
     
     setIsSavingPreview(true);
     setErr(null);
-    
-    const toastId = toast.loading("Saving preview...");
 
     try {
-      // Different mutation based on column type
-      const mutation = column.type === 'text' 
-        ? `mutation($itemId: ID!, $boardId: ID!, $colId: String!, $val: String!) {
-            change_simple_column_value(
-              item_id: $itemId, 
-              board_id: $boardId, 
-              column_id: $colId, 
-              value: $val
-            ) { id }
-          }`
-        : `mutation($itemId: ID!, $boardId: ID!, $colId: String!, $val: JSON!) {
-            change_column_value(
-              item_id: $itemId,
-              board_id: $boardId,
-              column_id: $colId,
-              value: $val
-            ) { id }
-          }`;
+      const mutation = `
+        mutation ($itemId: ID!, $boardId: ID!, $columnId: String!, $value: JSON!) {
+          change_column_value(
+            item_id: $itemId,
+            board_id: $boardId,
+            column_id: $columnId,
+            value: $value
+          ) {
+            id
+          }
+        }`;
 
-      // Prepare value based on column type
-      let value;
-      if (column.type === 'text') {
-        value = currentText;
-      } else {
-        // For board-relation, preserve existing links
-        let existing = {};
-        try {
-          existing = column.value ? JSON.parse(column.value) : {};
-        } catch (e) {
-          console.warn("Could not parse existing value:", e);
-        }
-
-        value = JSON.stringify({
-          linkedPulseIds: existing.linkedPulseIds || [],
-          text: currentText
-        });
-      }
+      const value = createColumnValue(
+        column.column?.type,
+        currentText,
+        column.value
+      );
 
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
-        colId: column.id,
-        val: value
+        columnId: column.id,
+        value
       };
 
-      console.log(`Saving to ${column.type} column:`, variables);
+      console.log(`Saving to ${column.column?.type} column:`, variables);
       const res = await monday.api(mutation, { variables });
-      console.log("Save response:", res);
       
       if (res?.error || !res?.data?.change_column_value?.id) {
         throw new Error(res?.error || "Failed to save");
@@ -526,10 +522,10 @@ export default function ItemPage() {
       setItem(prev => ({
         ...prev,
         column_values: prev.column_values.map(cv =>
-          cv.id === column.id ? { 
-            ...cv, 
+          cv.id === column.id ? {
+            ...cv,
             text: currentText,
-            value: column.type === 'text' ? currentText : value
+            value: value
           } : cv
         )
       }));
@@ -537,22 +533,10 @@ export default function ItemPage() {
       setIsDirty(false);
       setPreviewOverride("");
       setPreviewSavedAt(new Date());
-      
-      toast.update(toastId, {
-        render: "Preview saved successfully",
-        type: "success",
-        isLoading: false,
-        autoClose: 3000
-      });
+      toast.success("Preview saved successfully");
     } catch (err) {
       console.error("Save failed:", err);
-      toast.update(toastId, {
-        render: `Save failed: ${err.message || 'Unknown error'}`,
-        type: "error",
-        isLoading: false,
-        autoClose: 5000
-      });
-      setErr(`Save failed: ${err.message || 'Unknown error'}`);
+      toast.error(`Save failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSavingPreview(false);
     }
@@ -585,7 +569,9 @@ export default function ItemPage() {
         ) : (
           <>
             <div className="hrow" style={{ justifyContent: "space-between" }}>
-              <button className="btnBack" onClick={() => (window.location.hash = "#/")}>← Back</button>
+              <button className="btnBack" onClick={() => (window.location.hash = "#/")}>
+                ← Back
+              </button>
               <div className="meta">
                 {item && `Item: ${item.name} · Board: ${item.board?.name}`}
               </div>
@@ -607,235 +593,221 @@ export default function ItemPage() {
               </div>
             )}
 
-            {!loading && !err && item && (
-              <div className="item-content">
-                {/* Rest of your existing content */}
-                {children}
-              </div>
+            {!loading && !err && (
+              <>
+                {/* ───────── Prompts (tabs + textarea) ───────── */}
+                <div className="card" style={{ marginTop: 16 }}>
+                  <div className="cardHeader">
+                    <div className="sectionTitle">Prompts</div>
+                    <div className="tabs">
+                      {[0, 1, 2].map((i) => (
+                        <button
+                          key={i}
+                          className={`tab ${activePromptIdx === i ? "active" : ""}`}
+                          onClick={() => {
+                            setActivePromptIdx(i);
+                            if (!isDirty) setPreviewOverride(""); // reset override als user nog niet edite
+                          }}
+                        >
+                          Prompt {i + 1}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="cardBody">
+                    <div
+                      className="promptBox preWrap"
+                      aria-label={`Prompt ${activePromptIdx + 1}`}
+                    >
+                      {activePromptText
+                        ? activePromptText
+                        : <span className="muted">Geen tekst voor deze prompt.</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ───────── Hooks (verticale, aanklikbare cards) ───────── */}
+                <div className="card" style={{ marginTop: 16 }}>
+                  <div className="sectionTitle">Hooks</div>
+
+                  {hooks.length ? (
+                    <div className="hookList" style={{ marginTop: 8 }}>
+                      {hooks.map((h, i) => (
+                        <label
+                          key={i}
+                          className={`hookRow ${activeHookIdx === i ? "active" : ""}`}
+                        >
+                          <input
+                            type="radio"
+                            name="hook"
+                            checked={activeHookIdx === i}
+                            onChange={() => {
+                              setActiveHookIdx(i);
+                              if (!isDirty) setPreviewOverride("");
+                            }}
+                          />
+                          <span className="hookBadge">#{i + 1}</span>
+                          <span className="hookText">{h}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="hint" style={{ marginTop: 8 }}>Geen hooks gevonden.</div>
+                  )}
+                </div>
+
+                {/* ───────── Media Attachment (tussen Hooks en Preview) ───────── */}
+                <div className="card" style={{ marginTop: 16 }}>
+                  <div className="sectionTitle">Media Attachment</div>
+
+                  <label className="dropZone">
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*,video/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => handleFilesPicked(e.target.files)}
+                    />
+                    <div className="dzInner">
+                      <div className="dzIcon">🖼️</div>
+                      <div>Drop files here or click to browse</div>
+                      <div className="dzSub">Images and videos supported</div>
+                    </div>
+                  </label>
+
+                  {/* B: Alles verwijderen knop */}
+                  <div className="mediaToolbar">
+                    <button
+                      type="button"
+                      className="linkBtn danger"
+                      disabled={!uploaded.length}
+                      onClick={handleClearAllMedia}
+                      title="Verwijder alle geüploade media uit dit item"
+                    >
+                      Verwijder alle media
+                    </button>
+                  </div>
+
+                  {/* Bestandenlijst (alleen tonen als er items zijn) */}
+                  {uploaded.length > 0 && (
+                    <div className="mediaList">
+                      {uploaded.map((m, ix) => (
+                        <div
+                          key={(m.id || m.url) + ix}
+                          className={`mediaRow ${ix === activeMediaIdx ? "is-active" : ""}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setActiveMediaIdx(ix)}
+                          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveMediaIdx(ix)}
+                        >
+                          <div className="mediaMeta">
+                            <span className="mediaType" title={m.type || ""}>
+                              {m.type && m.type.startsWith("video") ? "🎬" : "🖼️"}
+                            </span>
+                            <span className="mediaName" title={m.name || "(naamloos)"}>
+                              {m.name || "(naamloos)"}
+                            </span>
+                            {m.isLocal && <span className="badge">uploading…</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ───────── Preview (LinkedIn-stijl) ───────── */}
+                <div className="li-card" style={{ marginTop: 16 }}>
+                  <div className="liHeader">
+                    <div className="liAvatar">YN</div>
+                    <div className="liHeadText">
+                      <div className="liWho">Your Name</div>
+                      <div className="liSub">Just now • 🌐</div>
+                    </div>
+                  </div>
+
+                  <div className="liBody">
+                    {/* uncontrolled contentEditable: React does not write children so caret won't jump */}
+                    <div
+                      ref={previewRef}
+                      className="liPostText"
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={(e) => {
+                        setIsDirty(true);
+                        setPreviewOverride(e.currentTarget.innerText);
+                      }}
+                    />
+                  </div>
+
+                  {activeMedia ? (
+                    <div className="liMedia" style={{ position: "relative" }}>
+                      {activeMedia.type && activeMedia.type.startsWith("video")
+                        ? <video controls src={activeMedia.url} />
+                        : <img src={activeMedia.url} alt={activeMedia.name || "media"} />}
+                      {uploaded.length > 1 && (
+                        <div className="mediaNav">
+                          <button
+                            type="button"
+                            onClick={() => setActiveMediaIdx(i => (i - 1 + uploaded.length) % uploaded.length)}
+                            aria-label="Previous media"
+                          >
+                            ‹
+                          </button>
+                          <span>{activeMediaIdx + 1}/{uploaded.length}</span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMediaIdx(i => (i + 1) % uploaded.length)}
+                            aria-label="Next media"
+                          >
+                            ›
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="liMedia liMedia--empty">
+                      <div className="liMediaPlaceholder">
+                        <span className="liMediaIcon">🖼️</span>
+                        <span>No media attached</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Onderste balk zoals op LinkedIn */}
+                  <div className="liActions">
+                    <button className="liAction">👍 Like</button>
+                    <button className="liAction">💬 Comment</button>
+                    <button className="liAction">🔗 Share</button>
+                    <button className="liAction">✉️ Send</button>
+                  </div>
+                </div>
+
+                {/* Save button */}
+                <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={savePreviewToMonday}
+                    disabled={isSavingPreview}
+                    className="linkBtn btnSave"
+                  >
+                    {isSavingPreview ? "Saving…" : "Save preview"}
+                  </button>
+                  {previewSavedAt && (
+                    <span style={{ fontSize: 12, color: "#666" }}>
+                      Saved {previewSavedAt.toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+              </>
             )}
           </>
         )}
       </div>
     </ErrorBoundary>
   );
-
-      {!loading && !err && (
-        <>
-          {/* ───────── Prompts (tabs + textarea) ───────── */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="cardHeader">
-              <div className="sectionTitle">Prompts</div>
-              <div className="tabs">
-                {[0, 1, 2].map((i) => (
-                  <button
-                    key={i}
-                    className={`tab ${activePromptIdx === i ? "active" : ""}`}
-                    onClick={() => {
-                      setActivePromptIdx(i);
-                      if (!isDirty) setPreviewOverride(""); // reset override als user nog niet edite
-                    }}
-                  >
-                    Prompt {i + 1}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cardBody">
-              <div
-                className="promptBox preWrap"
-                aria-label={`Prompt ${activePromptIdx + 1}`}
-              >
-                {activePromptText
-                  ? activePromptText
-                  : <span className="muted">Geen tekst voor deze prompt.</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* ───────── Hooks (verticale, aanklikbare cards) ───────── */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="sectionTitle">Hooks</div>
-
-            {hooks.length ? (
-              <div className="hookList" style={{ marginTop: 8 }}>
-                {hooks.map((h, i) => (
-                  <label
-                    key={i}
-                    className={`hookRow ${activeHookIdx === i ? "active" : ""}`}
-                  >
-                    <input
-                      type="radio"
-                      name="hook"
-                      checked={activeHookIdx === i}
-                      onChange={() => {
-                        setActiveHookIdx(i);
-                        if (!isDirty) setPreviewOverride("");
-                      }}
-                    />
-                    <span className="hookBadge">#{i + 1}</span>
-                    <span className="hookText">{h}</span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <div className="hint" style={{ marginTop: 8 }}>Geen hooks gevonden.</div>
-            )}
-          </div>
-
-          {/* ───────── Media Attachment (tussen Hooks en Preview) ───────── */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="sectionTitle">Media Attachment</div>
-
-            <label className="dropZone">
-              <input
-                type="file"
-                multiple
-                accept="image/*,video/*"
-                style={{ display: "none" }}
-                onChange={(e) => handleFilesPicked(e.target.files)}
-              />
-              <div className="dzInner">
-                <div className="dzIcon">🖼️</div>
-                <div>Drop files here or click to browse</div>
-                <div className="dzSub">Images and videos supported</div>
-              </div>
-            </label>
-
-            {/* B: Alles verwijderen knop */}
-            <div className="mediaToolbar">
-              <button
-                type="button"
-                className="linkBtn danger"
-                disabled={!uploaded.length}
-                onClick={handleClearAllMedia}
-                title="Verwijder alle geüploade media uit dit item"
-              >
-                Verwijder alle media
-              </button>
-            </div>
-
-            {/* Bestandenlijst (alleen tonen als er items zijn) */}
-            {uploaded.length > 0 && (
-              <div className="mediaList">
-                {uploaded.map((m, ix) => (
-                  <div
-                    key={(m.id || m.url) + ix}
-                    className={`mediaRow ${ix === activeMediaIdx ? "is-active" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setActiveMediaIdx(ix)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveMediaIdx(ix)}
-                  >
-                    <div className="mediaMeta">
-                      <span className="mediaType" title={m.type || ""}>
-                        {m.type && m.type.startsWith("video") ? "🎬" : "🖼️"}
-                      </span>
-                      <span className="mediaName" title={m.name || "(naamloos)"}>
-                        {m.name || "(naamloos)"}
-                      </span>
-                      {m.isLocal && <span className="badge">uploading…</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* ───────── Preview (LinkedIn-stijl) ───────── */}
-          <div className="li-card" style={{ marginTop: 16 }}>
-            <div className="liHeader">
-              <div className="liAvatar">YN</div>
-              <div className="liHeadText">
-                <div className="liWho">Your Name</div>
-                <div className="liSub">Just now • 🌐</div>
-              </div>
-            </div>
-
-            <div className="liBody">
-              {/* uncontrolled contentEditable: React does not write children so caret won't jump */}
-              <div
-                ref={previewRef}
-                className="liPostText"
-                contentEditable
-                suppressContentEditableWarning
-                onInput={(e) => {
-                  setIsDirty(true);
-                  setPreviewOverride(e.currentTarget.innerText);
-                }}
-              />
-            </div>
-
-            {activeMedia ? (
-              <div className="liMedia" style={{ position: "relative" }}>
-                {activeMedia.type && activeMedia.type.startsWith("video")
-                  ? <video controls src={activeMedia.url} />
-                  : <img src={activeMedia.url} alt={activeMedia.name || "media"} />}
-                {uploaded.length > 1 && (
-                  <div className="mediaNav">
-                    <button
-                      type="button"
-                      onClick={() => setActiveMediaIdx(i => (i - 1 + uploaded.length) % uploaded.length)}
-                      aria-label="Previous media"
-                    >
-                      ‹
-                    </button>
-                    <span>{activeMediaIdx + 1}/{uploaded.length}</span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveMediaIdx(i => (i + 1) % uploaded.length)}
-                      aria-label="Next media"
-                    >
-                      ›
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="liMedia liMedia--empty">
-                <div className="liMediaPlaceholder">
-                  <span className="liMediaIcon">🖼️</span>
-                  <span>No media attached</span>
-                </div>
-              </div>
-            )}
-
-            {/* Onderste balk zoals op LinkedIn */}
-            <div className="liActions">
-              <button className="liAction">👍 Like</button>
-              <button className="liAction">💬 Comment</button>
-              <button className="liAction">🔗 Share</button>
-              <button className="liAction">✉️ Send</button>
-            </div>
-          </div>
-
-          {/* Save button */}
-          <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={savePreviewToMonday}
-              disabled={isSavingPreview}
-              className="linkBtn btnSave"
-              style={{
-                background: isSavingPreview ? "#6ea0d6" : "#0b66c3",
-                color: "#fff",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "none",
-                cursor: isSavingPreview ? "default" : "pointer",
-                boxShadow: "0 1px 0 rgba(0,0,0,0.1)"
-              }}
-            >
-              {isSavingPreview ? "Saving…" : "Save preview"}
-            </button>
-            {previewSavedAt && <span style={{ fontSize: 12, color: "#666" }}>Saved {previewSavedAt.toLocaleTimeString()}</span>}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
-// First add this helper near the top
+// First, move the getColumnDetails helper function above the component
 function getColumnDetails(columnValues = []) {
   // Log all columns for debugging
   console.log("All columns:", columnValues.map(cv => ({
