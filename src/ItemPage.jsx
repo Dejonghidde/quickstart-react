@@ -135,6 +135,19 @@ export default function ItemPage() {
     [uploaded, activeMediaIdx]
   );
 
+  const safeNotice = React.useCallback((payload) => {
+    if (!payload) return;
+    try {
+      if (typeof monday?.execute === "function") {
+        monday.execute("notice", payload);
+      } else {
+        console.warn("monday.execute unavailable; skipping notice:", payload);
+      }
+    } catch (err) {
+      console.warn("monday.execute('notice') failed:", err);
+    }
+  }, []);
+
   // Vind de kolom-id van "Media" op basis van de kolomtitel (fallback: 'files')
   const mediaColumnId = React.useMemo(() => {
     if (!item?.column_values) return null;
@@ -201,7 +214,7 @@ export default function ItemPage() {
           return next;
         });
 
-        monday.execute('notice', { 
+        safeNotice({
           message: `Uploaded: ${file.name}`,
           type: 'success',
           timeout: 5000
@@ -222,7 +235,7 @@ export default function ItemPage() {
           return next;
         });
         
-        monday.execute('notice', { 
+        safeNotice({
           message: `Upload failed: ${file.name}`,
           type: 'error',
           timeout: 5000
@@ -405,30 +418,49 @@ export default function ItemPage() {
     }
   }, [effectivePreview, isDirty]);
 
-  // Add this helper function at the top
-  function createColumnValue(columnType, text, existingValue = null) {
-    switch (columnType) {
-      case 'text':
-        return JSON.stringify({ text });
-      
-      case 'board-relation':
-        const existing = existingValue ? JSON.parse(existingValue) : {};
-        return JSON.stringify({
-          linkedPulseIds: existing.linkedPulseIds || [],
-          update: {
-            text: text
-          }
-        });
-      
-      default:
-        return JSON.stringify({ text });
+  const TEXTUAL_COLUMN_TYPES = React.useMemo(() => new Set(["text", "long-text"]), []);
+
+  function findPreviewColumn() {
+    if (!item?.column_values?.length) return null;
+
+    const candidates = item.column_values.filter((cv) => {
+      const id = (cv?.id || "").toLowerCase();
+      const title = (cv?.column?.title || "").toLowerCase();
+      return (
+        id === "text_mkx3qq8w" ||
+        /linkedin preview|linkedin\s*copy|preview/i.test(title)
+      );
+    });
+
+    if (!candidates.length) return null;
+
+    const firstTextual = candidates.find((cv) =>
+      TEXTUAL_COLUMN_TYPES.has((cv?.column?.type || "").toLowerCase())
+    );
+
+    if (!firstTextual) {
+      console.warn("Preview column candidates lack textual types:", candidates.map((cv) => ({
+        id: cv?.id,
+        title: cv?.column?.title,
+        type: cv?.column?.type
+      })));
     }
+
+    return firstTextual || null;
+  }
+
+  function createColumnValue(columnType, text) {
+    const normalised = (columnType || "").toLowerCase();
+    if (!TEXTUAL_COLUMN_TYPES.has(normalised)) {
+      throw new Error(`Unsupported preview column type: ${columnType || "unknown"}`);
+    }
+    return JSON.stringify({ text });
   }
 
   // Then update the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
-      monday.execute('notice', {
+      safeNotice({
         message: "Missing item ID or board ID",
         type: 'error',
         timeout: 5000
@@ -436,16 +468,12 @@ export default function ItemPage() {
       return;
     }
 
-    const column = item.column_values.find(cv =>
-      cv.id === "board_relation_mkw9ah6f" ||
-      cv.id === "text_mkx3qq8w" ||
-      /linkedin|preview/i.test(cv?.column?.title || "")
-    );
+    const column = findPreviewColumn();
 
     if (!column) {
       console.warn("Available columns:", item?.column_values);
-      monday.execute('notice', {
-        message: "Preview kolom niet gevonden",
+      safeNotice({
+        message: "Preview text column niet gevonden",
         type: 'error',
         timeout: 5000
       });
@@ -472,8 +500,7 @@ export default function ItemPage() {
 
       const value = createColumnValue(
         column.column?.type,
-        currentText,
-        column.value
+        currentText
       );
 
       const variables = {
@@ -505,14 +532,14 @@ export default function ItemPage() {
       setIsDirty(false);
       setPreviewOverride("");
       setPreviewSavedAt(new Date());
-      monday.execute('notice', {
+      safeNotice({
         message: "Preview saved successfully",
         type: 'success',
         timeout: 5000
       });
     } catch (err) {
       console.error("Save failed:", err);
-      monday.execute('notice', {
+      safeNotice({
         message: `Save failed: ${err.message || 'Unknown error'}`,
         type: 'error',
         timeout: 5000
@@ -787,8 +814,7 @@ function getColumnDetails(columnValues = []) {
 
   // Try to find preview column
   const previewColumn = columnValues.find(cv => 
-    cv.id === "text_mkx3qq8w" ||           // exact text column match
-    cv.id === "board_relation_mkw9ah6f" || // exact board relation match
+    cv.id === "text_mkx3qq8w" ||
     /linkedin preview|preview|linkedin/i.test(cv?.column?.title || "")
   );
 
