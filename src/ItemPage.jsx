@@ -5,6 +5,59 @@ import ErrorBoundary from './components/ErrorBoundary';
 import LoadingIndicator from './components/LoadingIndicator';
 import "./ui.css";
 
+const TEXTUAL_COLUMN_TYPES = new Set([
+  "text",
+  "long-text",
+  "long_text",
+  "rich-text",
+  "rich_text"
+]);
+
+function pickPreviewColumn(columnValues = []) {
+  if (!Array.isArray(columnValues) || !columnValues.length) return null;
+
+  const normalised = columnValues.map((cv) => ({
+    ref: cv,
+    id: (cv?.id || "").toLowerCase(),
+    title: (cv?.column?.title || "").toLowerCase(),
+    type: (cv?.column?.type || "").toLowerCase()
+  }));
+
+  const matchById = normalised.find((cv) => cv.id === "text_mkx3qq8w");
+  if (matchById && TEXTUAL_COLUMN_TYPES.has(matchById.type)) {
+    return matchById.ref;
+  }
+
+  const matchByTitle = normalised.find(
+    (cv) =>
+      TEXTUAL_COLUMN_TYPES.has(cv.type) &&
+      /linkedin preview|linkedin\s*copy|preview|linkedin/i.test(cv.title || "")
+  );
+  if (matchByTitle) return matchByTitle.ref;
+
+  const fallbackTextual = normalised.find((cv) =>
+    TEXTUAL_COLUMN_TYPES.has(cv.type)
+  );
+  if (fallbackTextual) {
+    console.warn("Fallback preview column selected:", {
+      id: fallbackTextual.ref?.id,
+      title: fallbackTextual.ref?.column?.title,
+      type: fallbackTextual.ref?.column?.type
+    });
+    return fallbackTextual.ref;
+  }
+
+  console.warn(
+    "No textual column available for preview. Candidates:",
+    normalised.map(({ id, title, type }) => ({ id, title, type }))
+  );
+  return null;
+}
+
+function createTextColumnValue(text) {
+  return JSON.stringify({ text });
+}
+
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
 function useItemIdFromHash() {
   const read = () =>
@@ -397,14 +450,10 @@ export default function ItemPage() {
   }
 
   // keep a reliable preview column id (prefer the exact internal id you provided)
-  const previewColumnId = React.useMemo(() => {
-    if (!item?.column_values) return null;
-    // prefer the exact internal id you pasted (text_mkx3qq8w), else match title
-    const byId = item.column_values.find(cv => /text_mkx3qq8w/i.test(cv.id));
-    if (byId) return byId.id;
-    const byTitle = item.column_values.find(cv => /linkedin preview|preview|linkedin/i.test(cv?.column?.title || ""));
-    return byTitle?.id || null;
-  }, [item]);
+  const previewColumn = React.useMemo(
+    () => pickPreviewColumn(item?.column_values || []),
+    [item?.column_values]
+  );
 
   // Sync DOM -> set initial/externally-updated preview text when user hasn't edited
   React.useEffect(() => {
@@ -418,45 +467,6 @@ export default function ItemPage() {
     }
   }, [effectivePreview, isDirty]);
 
-  const TEXTUAL_COLUMN_TYPES = React.useMemo(() => new Set(["text", "long-text"]), []);
-
-  function findPreviewColumn() {
-    if (!item?.column_values?.length) return null;
-
-    const candidates = item.column_values.filter((cv) => {
-      const id = (cv?.id || "").toLowerCase();
-      const title = (cv?.column?.title || "").toLowerCase();
-      return (
-        id === "text_mkx3qq8w" ||
-        /linkedin preview|linkedin\s*copy|preview/i.test(title)
-      );
-    });
-
-    if (!candidates.length) return null;
-
-    const firstTextual = candidates.find((cv) =>
-      TEXTUAL_COLUMN_TYPES.has((cv?.column?.type || "").toLowerCase())
-    );
-
-    if (!firstTextual) {
-      console.warn("Preview column candidates lack textual types:", candidates.map((cv) => ({
-        id: cv?.id,
-        title: cv?.column?.title,
-        type: cv?.column?.type
-      })));
-    }
-
-    return firstTextual || null;
-  }
-
-  function createColumnValue(columnType, text) {
-    const normalised = (columnType || "").toLowerCase();
-    if (!TEXTUAL_COLUMN_TYPES.has(normalised)) {
-      throw new Error(`Unsupported preview column type: ${columnType || "unknown"}`);
-    }
-    return JSON.stringify({ text });
-  }
-
   // Then update the savePreviewToMonday function
   async function savePreviewToMonday() {
     if (!item?.id || !item?.board?.id) {
@@ -468,9 +478,7 @@ export default function ItemPage() {
       return;
     }
 
-    const column = findPreviewColumn();
-
-    if (!column) {
+    if (!previewColumn) {
       console.warn("Available columns:", item?.column_values);
       safeNotice({
         message: "Preview text column niet gevonden",
@@ -498,19 +506,20 @@ export default function ItemPage() {
           }
         }`;
 
-      const value = createColumnValue(
-        column.column?.type,
-        currentText
-      );
+      const value = createTextColumnValue(currentText);
 
       const variables = {
         itemId: String(item.id),
         boardId: String(item.board.id),
-        columnId: column.id,
+        columnId: previewColumn.id,
         value
       };
 
-      console.log(`Saving to ${column.column?.type} column:`, variables);
+      console.log("Saving preview text", {
+        columnId: previewColumn.id,
+        columnTitle: previewColumn.column?.title,
+        columnType: previewColumn.column?.type
+      });
       const res = await monday.api(mutation, { variables });
       
       if (res?.error || !res?.data?.change_column_value?.id) {
@@ -521,7 +530,7 @@ export default function ItemPage() {
       setItem(prev => ({
         ...prev,
         column_values: prev.column_values.map(cv =>
-          cv.id === column.id ? {
+          cv.id === previewColumn.id ? {
             ...cv,
             text: currentText,
             value: value
@@ -800,30 +809,4 @@ export default function ItemPage() {
       </div>
     </ErrorBoundary>
   );
-}
-
-// First, move the getColumnDetails helper function above the component
-function getColumnDetails(columnValues = []) {
-  // Log all columns for debugging
-  console.log("All columns:", columnValues.map(cv => ({
-    id: cv.id,
-    title: cv.column?.title,
-    type: cv.column?.type,
-    value: cv.value
-  })));
-
-  // Try to find preview column
-  const previewColumn = columnValues.find(cv => 
-    cv.id === "text_mkx3qq8w" ||
-    /linkedin preview|preview|linkedin/i.test(cv?.column?.title || "")
-  );
-
-  if (!previewColumn) return null;
-
-  return {
-    id: previewColumn.id,
-    type: previewColumn.column?.type || 'text',
-    value: previewColumn.value,
-    title: previewColumn.column?.title
-  };
 }
