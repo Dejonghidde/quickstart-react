@@ -54,8 +54,30 @@ function pickPreviewColumn(columnValues = []) {
   return null;
 }
 
-function createTextColumnValue(text) {
-  return JSON.stringify({ text });
+function createPreviewColumnValue(columnValue, text) {
+  const rawType =
+    (columnValue?.type ||
+      columnValue?.column?.type ||
+      "").toLowerCase();
+
+  const content = String(text ?? "");
+
+  switch (rawType) {
+    case "text":
+      return JSON.stringify(content);
+    case "long-text":
+    case "long_text":
+    case "rich-text":
+    case "rich_text":
+      return JSON.stringify({ text: content });
+    default:
+      console.warn("Unsupported or unknown preview column type, falling back to plain text", {
+        type: rawType,
+        id: columnValue?.id,
+        title: columnValue?.column?.title || columnValue?.title
+      });
+      return JSON.stringify(content);
+  }
 }
 
 /** ───────────────────────────── ItemId uit hash ───────────────────────────── */
@@ -506,7 +528,7 @@ export default function ItemPage() {
           }
         }`;
 
-      const value = createTextColumnValue(currentText);
+      const value = createPreviewColumnValue(previewColumn, currentText);
 
       const variables = {
         itemId: String(item.id),
@@ -518,7 +540,8 @@ export default function ItemPage() {
       console.log("Saving preview text", {
         columnId: previewColumn.id,
         columnTitle: previewColumn.column?.title || previewColumn.title,
-        columnType: previewColumn.type || previewColumn.column?.type
+        columnType: (previewColumn.type || previewColumn.column?.type || "").toLowerCase(),
+        payload: value
       });
       const res = await monday.api(mutation, { variables });
       
