@@ -19,8 +19,8 @@ function pickPreviewColumn(columnValues = []) {
   const normalised = columnValues.map((cv) => ({
     ref: cv,
     id: (cv?.id || "").toLowerCase(),
-    title: (cv?.column?.title || "").toLowerCase(),
-    type: (cv?.column?.type || "").toLowerCase()
+    title: (cv?.column?.title || cv?.title || "").toLowerCase(),
+    type: (cv?.type || cv?.column?.type || "").toLowerCase()
   }));
 
   const matchById = normalised.find((cv) => cv.id === "text_mkx3qq8w");
@@ -41,8 +41,8 @@ function pickPreviewColumn(columnValues = []) {
   if (fallbackTextual) {
     console.warn("Fallback preview column selected:", {
       id: fallbackTextual.ref?.id,
-      title: fallbackTextual.ref?.column?.title,
-      type: fallbackTextual.ref?.column?.type
+      title: fallbackTextual.ref?.column?.title || fallbackTextual.ref?.title,
+      type: fallbackTextual.ref?.type || fallbackTextual.ref?.column?.type
     });
     return fallbackTextual.ref;
   }
@@ -78,7 +78,7 @@ const ITEM_Q_ID = `
       id
       name
       board { id name }
-      column_values { id text column { title } value }
+      column_values { id text type column { id title type } value }
       assets { id name url_thumbnail url public_url }
     }
   }
@@ -90,7 +90,7 @@ const ITEM_Q_INT = `
       id
       name
       board { id name }
-      column_values { id text column { title } value }
+      column_values { id text type column { id title type } value }
       assets { id name url_thumbnail url public_url }
     }
   }
@@ -517,8 +517,8 @@ export default function ItemPage() {
 
       console.log("Saving preview text", {
         columnId: previewColumn.id,
-        columnTitle: previewColumn.column?.title,
-        columnType: previewColumn.column?.type
+        columnTitle: previewColumn.column?.title || previewColumn.title,
+        columnType: previewColumn.type || previewColumn.column?.type
       });
       const res = await monday.api(mutation, { variables });
       
