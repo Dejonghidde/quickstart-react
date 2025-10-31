@@ -810,17 +810,17 @@ export default function ItemPage() {
                 </div>
 
                 {/* Save button */}
-                <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 16 }}>
                   <button
                     type="button"
                     onClick={savePreviewToMonday}
                     disabled={isSavingPreview}
-                    className="linkBtn btnSave"
+                    className="btnSave"
                   >
-                    {isSavingPreview ? "Saving…" : "Save preview"}
+                    {isSavingPreview ? "Posting…" : "Post the preview on LinkedIn"}
                   </button>
                   {previewSavedAt && (
-                    <span style={{ fontSize: 12, color: "#666" }}>
+                    <span style={{ fontSize: 12, color: "#666", textAlign: "right" }}>
                       Saved {previewSavedAt.toLocaleTimeString()}
                     </span>
                   )}
